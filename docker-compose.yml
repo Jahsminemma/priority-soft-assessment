@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: shiftsync
       POSTGRES_DB: shiftsync
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - shiftsync_pg:/var/lib/postgresql/data
 

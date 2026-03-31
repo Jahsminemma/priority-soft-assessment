@@ -3,12 +3,25 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 
-
 dotenv.config();
 
-import { authRouter } from "./routes/auth.js";
-import { assignmentsRouter } from "./routes/assignments.js";
-import { attachWebSocket } from "./ws.js";
+import {
+  adminInvitesRouter,
+  analyticsRouter,
+  auditRouter,
+  authRouter,
+  assignmentsRouter,
+  clockRouter,
+  coverageRouter,
+  locationsRouter,
+  meRouter,
+  notificationsRouter,
+  registerRouter,
+  scheduleRouter,
+  shiftsRouter,
+  skillsRouter,
+} from "./http/routes/index.js";
+import { attachWebSocket } from "./realtime/index.js";
 
 const app = express();
 const port = Number(process.env["PORT"] ?? 4000);
@@ -26,7 +39,19 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/api/auth", authRouter);
+app.use("/api/admin", adminInvitesRouter);
+app.use("/api/register", registerRouter);
+app.use("/api/me", meRouter);
+app.use("/api/audit", auditRouter);
+app.use("/api/analytics", analyticsRouter);
+app.use("/api/clock", clockRouter);
+app.use("/api/locations", locationsRouter);
+app.use("/api/shifts", shiftsRouter);
+app.use("/api/skills", skillsRouter);
 app.use("/api/assignments", assignmentsRouter);
+app.use("/api/schedule", scheduleRouter);
+app.use("/api/coverage", coverageRouter);
+app.use("/api/notifications", notificationsRouter);
 
 const httpServer = http.createServer(app);
 attachWebSocket(httpServer);

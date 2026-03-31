@@ -1,5 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import dotenv from "dotenv";
+
+dotenv.config();
+
 
 const prisma = new PrismaClient();
 
@@ -32,16 +36,6 @@ async function main(): Promise<void> {
     create: {
       id: "a0000000-0000-4000-8000-000000000003",
       name: "Coastal Eats — NYC",
-      tzIana: "America/New_York",
-    },
-  });
-
-  const locMia = await prisma.location.upsert({
-    where: { id: "a0000000-0000-4000-8000-000000000004" },
-    update: {},
-    create: {
-      id: "a0000000-0000-4000-8000-000000000004",
-      name: "Coastal Eats — Miami",
       tzIana: "America/New_York",
     },
   });

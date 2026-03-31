@@ -74,6 +74,23 @@ model User {
   notifications      Notification[]
   auditLogs          AuditLog[] @relation("Actor")
   clockSessions      ClockSession[]
+  registrationInvitesCreated RegistrationInvite[] @relation("RegistrationInvitesCreated")
+}
+
+model RegistrationInvite {
+  id                 String    @id @default(uuid())
+  tokenHash          String    @unique
+  email              String
+  name               String
+  role               UserRole
+  desiredHoursWeekly Float?
+  managerLocationIds Json?
+  expiresAt          DateTime
+  createdById        String
+  createdAt          DateTime  @default(now())
+  consumedAt         DateTime?
+
+  createdBy User @relation("RegistrationInvitesCreated", fields: [createdById], references: [id], onDelete: Cascade)
 }
 
 model ManagerLocation {
@@ -165,9 +182,10 @@ model Shift {
   location         Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
   requiredSkill    Skill       @relation(fields: [requiredSkillId], references: [id])
   createdBy        User?       @relation("ShiftCreator", fields: [createdById], references: [id])
-  assignments      ShiftAssignment[]
-  coverageRequests CoverageRequest[]
-  clockSessions    ClockSession[]
+  assignments              ShiftAssignment[]
+  coverageRequestsPrimary  CoverageRequest[] @relation("CoveragePrimaryShift")
+  coverageRequestsSecond   CoverageRequest[] @relation("CoverageSecondShift")
+  clockSessions            ClockSession[]
 }
 
 model ShiftAssignment {
@@ -184,17 +202,21 @@ model ShiftAssignment {
 }
 
 model CoverageRequest {
-  id          String                @id @default(uuid())
-  type        CoverageRequestType
-  shiftId     String
-  requesterId String
-  targetId    String?
-  status      CoverageRequestStatus @default(PENDING)
-  createdAt   DateTime              @default(now())
-  expiresAt   DateTime?
-  shift       Shift                 @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  requester   User                  @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
-  target      User?                 @relation("Target", fields: [targetId], references: [id], onDelete: SetNull)
+  id            String                @id @default(uuid())
+  type          CoverageRequestType
+  /** Requester's shift (the shift they are giving up in a swap, or the only shift in a handoff/drop). */
+  shiftId       String
+  /** For a two-person shift swap: the target's shift (Staff B's shift). Null = single handoff swap (A gives shift to B only). */
+  secondShiftId String?
+  requesterId   String
+  targetId      String?
+  status        CoverageRequestStatus @default(PENDING)
+  createdAt     DateTime              @default(now())
+  expiresAt     DateTime?
+  shift         Shift                 @relation("CoveragePrimaryShift", fields: [shiftId], references: [id], onDelete: Cascade)
+  secondShift   Shift?                @relation("CoverageSecondShift", fields: [secondShiftId], references: [id], onDelete: Cascade)
+  requester     User                  @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  target        User?                 @relation("Target", fields: [targetId], references: [id], onDelete: SetNull)
 }
 
 model Notification {

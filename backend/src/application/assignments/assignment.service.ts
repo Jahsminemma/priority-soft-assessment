@@ -1,11 +1,13 @@
 import { Prisma } from "@prisma/client";
 import type { AssignmentCommitResponse, AssignmentPreviewResponse } from "@shiftsync/shared";
-import { prisma } from "../lib/prisma.js";
 import {
   evaluateAssignmentConstraints,
   type ConstraintContext,
   type ShiftIntervalInput,
-} from "../domain/constraints.js";
+} from "../../domain/scheduling/index.js";
+import { prisma } from "../../infrastructure/persistence/index.js";
+import { emitAssignmentChanged, emitAssignmentConflict } from "../../realtime/events.js";
+import { createNotification } from "../notifications/notification.service.js";
 
 export async function previewAssignment(
   shiftId: string,
@@ -83,9 +85,35 @@ export async function commitAssignment(
       data: { key: idempotencyKey, resultJson: res as Prisma.InputJsonValue },
     });
 
+    const shiftRow = await prisma.shift.findUniqueOrThrow({
+      where: { id: shiftId },
+      select: { locationId: true, startAtUtc: true, endAtUtc: true, weekKey: true },
+    });
+    emitAssignmentChanged(shiftRow.locationId, {
+      shiftId,
+      staffUserId,
+      assignmentId: result.id,
+    });
+
+    await createNotification(staffUserId, "assignment.created", {
+      shiftId,
+      assignmentId: result.id,
+      locationId: shiftRow.locationId,
+      weekKey: shiftRow.weekKey,
+      startAtUtc: shiftRow.startAtUtc.toISOString(),
+      endAtUtc: shiftRow.endAtUtc.toISOString(),
+    });
+
     return res;
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      const loc = await prisma.shift.findUnique({ where: { id: shiftId }, select: { locationId: true } });
+      if (loc) {
+        emitAssignmentConflict(loc.locationId, {
+          shiftId,
+          message: "Assignment conflict — staff may already be assigned to this shift.",
+        });
+      }
       return {
         success: false,
         hardViolations: [],
@@ -98,7 +126,7 @@ export async function commitAssignment(
   }
 }
 
-async function buildConstraintContext(
+export async function buildConstraintContext(
   shiftId: string,
   staffUserId: string,
 ): Promise<ConstraintContext> {
