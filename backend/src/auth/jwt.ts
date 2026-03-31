@@ -15,19 +15,19 @@ export function signToken(payload: JwtPayload, expiresIn: SignOptions["expiresIn
 }
 
 export function verifyToken(token: string): JwtPayload {
-  const decoded = jwt.verify(token, JWT_SECRET);
-  if (typeof decoded !== "object" || decoded === null) throw new Error("Invalid token");
-  const o = decoded as Record<string, unknown>;
+  const verifyToken = jwt.verify(token, JWT_SECRET);
+  if (typeof verifyToken !== "object" || verifyToken === null) throw new Error("Invalid token");
+  const decodedToken = verifyToken as Record<string, unknown>;
   if (
-    typeof o["sub"] !== "string" ||
-    typeof o["email"] !== "string" ||
-    typeof o["role"] !== "string"
+    typeof decodedToken["sub"] !== "string" ||
+    typeof decodedToken["email"] !== "string" ||
+    typeof decodedToken["role"] !== "string"
   ) {
     throw new Error("Invalid token payload");
   }
   return {
-    sub: o["sub"],
-    email: o["email"],
-    role: o["role"] as UserRole,
+    sub: decodedToken["sub"],
+    email: decodedToken["email"],
+    role: decodedToken["role"] as UserRole,
   };
 }
