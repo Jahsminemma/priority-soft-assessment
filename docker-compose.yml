@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shiftsync
+      POSTGRES_PASSWORD: shiftsync
+      POSTGRES_DB: shiftsync
+    ports:
+      - "5432:5432"
+    volumes:
+      - shiftsync_pg:/var/lib/postgresql/data
+
+volumes:
+  shiftsync_pg:

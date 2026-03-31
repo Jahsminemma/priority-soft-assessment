@@ -1,0 +1,238 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  STAFF
+}
+
+enum ShiftStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum ScheduleWeekStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  PROPOSED
+}
+
+enum CoverageRequestType {
+  SWAP
+  DROP
+}
+
+enum CoverageRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  MANAGER_APPROVED
+  CANCELLED
+  EXPIRED
+}
+
+enum AvailabilityExceptionType {
+  UNAVAILABLE
+  AVAILABLE_OVERRIDE
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL_SIMULATED
+}
+
+model User {
+  id                 String   @id @default(uuid())
+  email              String   @unique
+  passwordHash       String
+  name               String
+  role               UserRole
+  desiredHoursWeekly Float?
+  notificationPrefs  Json     @default("{}")
+  createdAt          DateTime @default(now())
+
+  managerLocations ManagerLocation[]
+  staffSkills        StaffSkill[]
+  certifications     StaffCertification[]
+  availabilityRules  AvailabilityRule[]
+  availabilityExceptions AvailabilityException[]
+  shiftAssignments   ShiftAssignment[] @relation("StaffAssignments")
+  createdShifts      Shift[] @relation("ShiftCreator")
+  coverageRequestsAsRequester CoverageRequest[] @relation("Requester")
+  coverageRequestsAsTarget    CoverageRequest[] @relation("Target")
+  notifications      Notification[]
+  auditLogs          AuditLog[] @relation("Actor")
+  clockSessions      ClockSession[]
+}
+
+model ManagerLocation {
+  userId     String
+  locationId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, locationId])
+}
+
+model Location {
+  id       String @id @default(uuid())
+  name     String
+  tzIana   String
+
+  managerLocations ManagerLocation[]
+  shifts           Shift[]
+  certifications   StaffCertification[]
+  scheduleWeeks    ScheduleWeek[]
+}
+
+model Skill {
+  id   String @id @default(uuid())
+  name String @unique
+
+  staffSkills StaffSkill[]
+  shifts      Shift[]
+}
+
+model StaffSkill {
+  userId  String
+  skillId String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([userId, skillId])
+}
+
+model StaffCertification {
+  userId     String
+  locationId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, locationId])
+}
+
+model AvailabilityRule {
+  id              String   @id @default(uuid())
+  userId          String
+  dayOfWeek       Int
+  startLocalTime  String
+  endLocalTime    String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AvailabilityException {
+  id        String                    @id @default(uuid())
+  userId    String
+  startAtUtc DateTime
+  endAtUtc   DateTime
+  type      AvailabilityExceptionType
+  user      User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ScheduleWeek {
+  id               String             @id @default(uuid())
+  locationId       String
+  weekStartDateLocal String
+  status           ScheduleWeekStatus @default(DRAFT)
+  cutoffHours      Int                @default(48)
+  location         Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, weekStartDateLocal])
+}
+
+model Shift {
+  id               String      @id @default(uuid())
+  locationId       String
+  startAtUtc       DateTime
+  endAtUtc         DateTime
+  requiredSkillId  String
+  headcount        Int
+  isPremium        Boolean     @default(false)
+  status           ShiftStatus @default(DRAFT)
+  weekKey          String
+  createdById      String?
+  location         Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  requiredSkill    Skill       @relation(fields: [requiredSkillId], references: [id])
+  createdBy        User?       @relation("ShiftCreator", fields: [createdById], references: [id])
+  assignments      ShiftAssignment[]
+  coverageRequests CoverageRequest[]
+  clockSessions    ClockSession[]
+}
+
+model ShiftAssignment {
+  id          String           @id @default(uuid())
+  shiftId     String
+  staffUserId String
+  status      AssignmentStatus @default(ASSIGNED)
+  createdAt   DateTime         @default(now())
+  shift       Shift            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  staff       User             @relation("StaffAssignments", fields: [staffUserId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, staffUserId])
+  @@index([staffUserId])
+}
+
+model CoverageRequest {
+  id          String                @id @default(uuid())
+  type        CoverageRequestType
+  shiftId     String
+  requesterId String
+  targetId    String?
+  status      CoverageRequestStatus @default(PENDING)
+  createdAt   DateTime              @default(now())
+  expiresAt   DateTime?
+  shift       Shift                 @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  requester   User                  @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  target      User?                 @relation("Target", fields: [targetId], references: [id], onDelete: SetNull)
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  type      String
+  payload   Json
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorUserId String
+  entityType String
+  entityId   String
+  action     String
+  beforeJson Json?
+  afterJson  Json?
+  createdAt  DateTime @default(now())
+  actor      User     @relation("Actor", fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+}
+
+model ClockSession {
+  id             String    @id @default(uuid())
+  staffUserId    String
+  shiftId        String?
+  clockInAtUtc   DateTime
+  clockOutAtUtc  DateTime?
+  staff          User      @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+  shift          Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+}
+
+model IdempotencyKey {
+  key       String   @id
+  resultJson Json
+  createdAt DateTime @default(now())
+}
