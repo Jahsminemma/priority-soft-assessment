@@ -14,11 +14,11 @@
    export DATABASE_URL="postgresql://shiftsync:shiftsync@localhost:5432/shiftsync"
    ```
 
-3. **Migrate + seed**:
+3. **Migrate + seed** (from `backend/`, with `DATABASE_URL` set):
 
    ```bash
    cd backend
-   npx prisma migrate dev --name init
+   npx prisma migrate deploy
    npm run db:seed
    ```
 

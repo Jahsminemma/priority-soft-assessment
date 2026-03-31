@@ -8,6 +8,6 @@ See [docs/README.md](docs/README.md) for local setup, seed accounts, and current
 npm install
 docker compose up -d
 # set DATABASE_URL, then:
-cd backend && npx prisma migrate dev --name init && npm run db:seed && cd ..
+cd backend && npx prisma migrate deploy && npm run db:seed && cd ..
 npm run dev
 ```
