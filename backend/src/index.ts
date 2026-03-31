@@ -1,6 +1,13 @@
+import { config as loadEnv } from "dotenv";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import http from "http";
 import express from "express";
 import cors from "cors";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+loadEnv({ path: resolve(__dirname, "../../.env") });
+loadEnv({ path: resolve(__dirname, "../.env") });
 import { authRouter } from "./routes/auth.js";
 import { assignmentsRouter } from "./routes/assignments.js";
 import { attachWebSocket } from "./ws.js";
