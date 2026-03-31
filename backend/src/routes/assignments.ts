@@ -28,16 +28,21 @@ assignmentsRouter.post(
   authMiddleware,
   requireRoles("ADMIN", "MANAGER"),
   async (req: AuthedRequest, res) => {
+
     const parsed = AssignmentCommitRequestSchema.safeParse(req.body);
+
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.flatten() });
       return;
     }
+
     const actorId = req.user?.id;
+
     if (!actorId) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
+    
     const out = await commitAssignment(
       parsed.data.shiftId,
       parsed.data.staffUserId,

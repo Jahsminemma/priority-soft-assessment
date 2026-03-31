@@ -11,8 +11,8 @@ export async function previewAssignment(
   shiftId: string,
   staffUserId: string,
 ): Promise<AssignmentPreviewResponse> {
-  const ctx = await buildConstraintContext(shiftId, staffUserId);
-  const { hard, warnings } = evaluateAssignmentConstraints(ctx, {});
+  const constraintContext = await buildConstraintContext(shiftId, staffUserId);
+  const { hard, warnings } = evaluateAssignmentConstraints(constraintContext, {});
   const ok = hard.length === 0;
   const alternatives = ok ? [] : await findAlternatives(shiftId, 5);
   return {
@@ -35,8 +35,8 @@ export async function commitAssignment(
     return JSON.parse(JSON.stringify(existing.resultJson)) as AssignmentCommitResponse;
   }
 
-  const ctx = await buildConstraintContext(shiftId, staffUserId);
-  const { hard, warnings } = evaluateAssignmentConstraints(ctx, { seventhDayOverrideReason });
+  const constraintContext = await buildConstraintContext(shiftId, staffUserId);
+  const { hard, warnings } = evaluateAssignmentConstraints(constraintContext, { seventhDayOverrideReason });
 
   if (hard.length > 0) {
     const res: AssignmentCommitResponse = {
