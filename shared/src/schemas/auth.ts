@@ -26,3 +26,45 @@ export const LoginResponseSchema = z.object({
 });
 
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
+
+export const CreateInviteRequestSchema = z
+  .object({
+    email: z.string().email(),
+    name: z.string().min(1).max(120),
+    role: UserRoleSchema,
+    desiredHoursWeekly: z.number().min(0).max(80).nullable().optional(),
+    managerLocationIds: z.array(z.string().uuid()).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.role === "MANAGER" && (data.managerLocationIds?.length ?? 0) < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pick at least one location for a manager.",
+        path: ["managerLocationIds"],
+      });
+    }
+  });
+
+export type CreateInviteRequest = z.infer<typeof CreateInviteRequestSchema>;
+
+export const CreateInviteResponseSchema = z.object({
+  token: z.string(),
+  expiresAt: z.string(),
+});
+
+export type CreateInviteResponse = z.infer<typeof CreateInviteResponseSchema>;
+
+export const RegisterVerifyResponseSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  role: UserRoleSchema,
+});
+
+export type RegisterVerifyResponse = z.infer<typeof RegisterVerifyResponseSchema>;
+
+export const RegisterCompleteRequestSchema = z.object({
+  token: z.string().min(32),
+  password: z.string().min(8).max(200),
+});
+
+export type RegisterCompleteRequest = z.infer<typeof RegisterCompleteRequestSchema>;
