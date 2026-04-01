@@ -16,6 +16,8 @@ export const ConstraintViolationCodeSchema = z.enum([
   "HEADCOUNT_FULL",
   /** Preview/commit target shift does not exist (or was removed). */
   "SHIFT_NOT_FOUND",
+  /** Published week: past the location’s edit cutoff before this shift. */
+  "SCHEDULE_CUTOFF",
 ]);
 
 export type ConstraintViolationCode = z.infer<typeof ConstraintViolationCodeSchema>;
@@ -35,6 +37,7 @@ export const CONSTRAINT_RULE_TITLES: Record<ConstraintViolationCode, string> = {
   WEEKLY_SEVENTH_DAY: "Seventh day in a row",
   HEADCOUNT_FULL: "Shift is fully staffed",
   SHIFT_NOT_FOUND: "Shift not found",
+  SCHEDULE_CUTOFF: "Schedule edit window closed",
 };
 
 export const ConstraintViolationSchema = z.object({
@@ -58,6 +61,8 @@ export const StaffAlternativeSchema = z.object({
   name: z.string(),
   reason: z.string(),
 });
+
+export type StaffAlternative = z.infer<typeof StaffAlternativeSchema>;
 
 export const AssignmentPreviewResponseSchema = z.object({
   ok: z.boolean(),
@@ -90,6 +95,9 @@ export const AssignmentCommitResponseSchema = z.object({
   warnings: z.array(ConstraintViolationSchema),
   conflict: z.boolean().optional(),
   message: z.string().optional(),
+  /** Present when success is false — same shape as assignment preview. */
+  alternatives: z.array(StaffAlternativeSchema).optional(),
+  ineligibleCandidates: z.array(StaffAlternativeSchema).optional(),
 });
 
 export type AssignmentCommitResponse = z.infer<typeof AssignmentCommitResponseSchema>;

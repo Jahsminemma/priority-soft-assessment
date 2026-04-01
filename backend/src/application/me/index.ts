@@ -1,5 +1,6 @@
 export {
   addMyAvailabilityException,
+  addMyAvailabilityExceptionsBatch,
   deleteMyAvailabilityException,
   getMyAvailability,
   getMyNotificationPrefs,

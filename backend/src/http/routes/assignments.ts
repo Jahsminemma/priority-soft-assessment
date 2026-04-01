@@ -3,10 +3,11 @@ import {
   AssignmentCommitRequestSchema,
   AssignmentPreviewRequestSchema,
 } from "@shiftsync/shared";
-import { commitAssignment, previewAssignment } from "../../application/assignments/index.js";
+import { commitAssignment, previewAssignment, removeAssignment } from "../../application/assignments/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { canManageLocation } from "../../security/index.js";
 import { authMiddleware, requireRoles, type AuthedRequest } from "../middleware/index.js";
+import { singleParam } from "../paramId.js";
 
 export const assignmentsRouter = Router();
 
@@ -42,7 +43,12 @@ assignmentsRouter.post(
       return;
     }
     if (!(await assertCanManageShift(req, parsed.data.shiftId, res))) return;
-    const out = await previewAssignment(parsed.data.shiftId, parsed.data.staffUserId);
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const out = await previewAssignment(parsed.data.shiftId, parsed.data.staffUserId, user);
     res.json(out);
   },
 );
@@ -60,9 +66,8 @@ assignmentsRouter.post(
       return;
     }
 
-    const actorId = req.user?.id;
-
-    if (!actorId) {
+    const actor = req.user;
+    if (!actor) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -74,8 +79,43 @@ assignmentsRouter.post(
       parsed.data.staffUserId,
       parsed.data.idempotencyKey,
       parsed.data.seventhDayOverrideReason,
-      actorId,
+      actor,
     );
     res.json(out);
+  },
+);
+
+assignmentsRouter.delete(
+  "/:assignmentId",
+  authMiddleware,
+  requireRoles("ADMIN", "MANAGER"),
+  async (req: AuthedRequest, res) => {
+    const actor = req.user;
+    if (!actor) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const assignmentId = singleParam(req.params["assignmentId"]);
+    if (!assignmentId) {
+      res.status(400).json({ error: "Missing assignment id" });
+      return;
+    }
+    const out = await removeAssignment(assignmentId, actor);
+    if (!out.ok) {
+      if (out.reason === "NOT_FOUND") {
+        res.status(404).json({ error: "Assignment not found" });
+        return;
+      }
+      if (out.reason === "PAST_CUTOFF") {
+        res.status(403).json({
+          error:
+            "This shift is on a published schedule and the edit window has closed. Unpublish the week or ask an administrator.",
+        });
+        return;
+      }
+      res.status(403).json({ error: "Forbidden for this assignment" });
+      return;
+    }
+    res.status(204).send();
   },
 );

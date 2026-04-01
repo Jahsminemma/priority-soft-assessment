@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { LocationWeekQuerySchema } from "@shiftsync/shared";
+import { AnalyticsLocationWeekQuerySchema } from "@shiftsync/shared";
 import { fairnessReport, overtimeWeekReport } from "../../application/analytics/index.js";
 import { authMiddleware, requireRoles, type AuthedRequest } from "../middleware/index.js";
 
@@ -15,7 +15,7 @@ analyticsRouter.get(
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const parsed = LocationWeekQuerySchema.safeParse(req.query);
+    const parsed = AnalyticsLocationWeekQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.flatten() });
       return;
@@ -39,7 +39,7 @@ analyticsRouter.get(
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const parsed = LocationWeekQuerySchema.safeParse(req.query);
+    const parsed = AnalyticsLocationWeekQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.flatten() });
       return;

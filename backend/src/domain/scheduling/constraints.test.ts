@@ -83,6 +83,40 @@ describe("evaluateAssignmentConstraints", () => {
     );
     expect(hard.some((h) => h.code === "DOUBLE_BOOK")).toBe(true);
   });
+
+  it("fails when a UNAVAILABLE exception overlaps the shift", () => {
+    const { hard } = evaluateAssignmentConstraints(
+      {
+        ...baseCtx,
+        availabilityExceptions: [
+          {
+            startAtUtc: new Date("2026-03-02T19:00:00.000Z"),
+            endAtUtc: new Date("2026-03-02T21:00:00.000Z"),
+            type: "UNAVAILABLE",
+          },
+        ],
+      },
+      {},
+    );
+    expect(hard.some((h) => h.code === "OUTSIDE_AVAILABILITY")).toBe(true);
+  });
+
+  it("does not treat AVAILABLE_OVERRIDE as unavailability", () => {
+    const { hard } = evaluateAssignmentConstraints(
+      {
+        ...baseCtx,
+        availabilityExceptions: [
+          {
+            startAtUtc: new Date("2026-03-02T19:00:00.000Z"),
+            endAtUtc: new Date("2026-03-02T21:00:00.000Z"),
+            type: "AVAILABLE_OVERRIDE",
+          },
+        ],
+      },
+      {},
+    );
+    expect(hard.some((h) => h.code === "OUTSIDE_AVAILABILITY")).toBe(false);
+  });
 });
 
 describe("splitShiftIntoLocalDaySegments", () => {

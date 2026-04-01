@@ -21,8 +21,9 @@ export async function listShiftsByLocationWeek(
   const shifts = await prisma.shift.findMany({
     where: { locationId, weekKey: { in: keys } },
     orderBy: { startAtUtc: "asc" },
+    include: { _count: { select: { assignments: true } } },
   });
-  return shifts.map(shiftRecordToDto);
+  return shifts.map((s) => shiftRecordToDto(s, { assignedCount: s._count.assignments }));
 }
 
 /** Published shifts at locations the staff member is certified for. */
@@ -39,7 +40,7 @@ export async function listPublishedShiftsForStaff(actor: AuthedUser, weekKey: st
     where: { weekKey: { in: keys }, locationId: { in: locIds }, status: "PUBLISHED" },
     orderBy: { startAtUtc: "asc" },
   });
-  return shifts.map(shiftRecordToDto);
+  return shifts.map((s) => shiftRecordToDto(s));
 }
 
 export type ModifyShiftGate = { ok: true } | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF" };

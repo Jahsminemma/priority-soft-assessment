@@ -85,6 +85,10 @@ model RegistrationInvite {
   role               UserRole
   desiredHoursWeekly Float?
   managerLocationIds Json?
+  /** When role is STAFF: skill UUIDs to assign on registration. */
+  staffSkillIds      Json?
+  /** When role is STAFF: location UUIDs where they are certified to work. */
+  staffLocationIds   Json?
   expiresAt          DateTime
   createdById        String
   createdAt          DateTime  @default(now())
@@ -149,12 +153,14 @@ model AvailabilityRule {
 }
 
 model AvailabilityException {
-  id        String                    @id @default(uuid())
-  userId    String
+  id         String                    @id @default(uuid())
+  userId     String
   startAtUtc DateTime
   endAtUtc   DateTime
-  type      AvailabilityExceptionType
-  user      User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       AvailabilityExceptionType
+  /** IANA zone used when the staff entered start/end (matches shift wall times at that site). */
+  tzIana     String?
+  user       User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ScheduleWeek {

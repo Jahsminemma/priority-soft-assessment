@@ -95,17 +95,29 @@ function segmentCoveredByRules(
   return false;
 }
 
+function toUtcMs(value: Date | string | number): number {
+  const d = value instanceof Date ? value : new Date(value);
+  return d.getTime();
+}
+
+function isUnavailableExceptionType(t: unknown): boolean {
+  return String(t ?? "").toUpperCase() === "UNAVAILABLE";
+}
+
+/** True if shift interval overlaps a UNAVAILABLE exception (half-open semantics: touching endpoints do not overlap). */
 function isBlockedByUnavailableException(
   startUtc: Date,
   endUtc: Date,
   exceptions: AvailabilityExceptionInput[],
 ): boolean {
-  const s = startUtc.getTime();
-  const e = endUtc.getTime();
+  const s = toUtcMs(startUtc);
+  const e = toUtcMs(endUtc);
+  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return false;
   for (const ex of exceptions) {
-    if (ex.type !== "UNAVAILABLE") continue;
-    const xs = ex.startAtUtc.getTime();
-    const xe = ex.endAtUtc.getTime();
+    if (!isUnavailableExceptionType(ex.type)) continue;
+    const xs = toUtcMs(ex.startAtUtc);
+    const xe = toUtcMs(ex.endAtUtc);
+    if (!Number.isFinite(xs) || !Number.isFinite(xe) || xe <= xs) continue;
     if (s < xe && e > xs) return true;
   }
   return false;

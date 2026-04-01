@@ -95,6 +95,25 @@ registerRouter.post("/complete", async (req, res): Promise<void> => {
         }
       }
 
+      if (invite.role === "STAFF") {
+        const rawSkills = invite.staffSkillIds;
+        const skillIds = Array.isArray(rawSkills) ? rawSkills.filter((x): x is string => typeof x === "string") : [];
+        if (skillIds.length) {
+          await tx.staffSkill.createMany({
+            data: skillIds.map((skillId) => ({ userId: user.id, skillId })),
+            skipDuplicates: true,
+          });
+        }
+        const rawLocs = invite.staffLocationIds;
+        const locIds = Array.isArray(rawLocs) ? rawLocs.filter((x): x is string => typeof x === "string") : [];
+        if (locIds.length) {
+          await tx.staffCertification.createMany({
+            data: locIds.map((locationId) => ({ userId: user.id, locationId })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
       await tx.registrationInvite.update({
         where: { id: invite.id },
         data: { consumedAt: new Date() },

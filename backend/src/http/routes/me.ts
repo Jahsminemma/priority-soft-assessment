@@ -1,11 +1,13 @@
 import { Router } from "express";
 import {
+  AvailabilityExceptionBatchInputSchema,
   AvailabilityExceptionInputSchema,
   NotificationPrefsSchema,
   ReplaceAvailabilityRulesSchema,
 } from "@shiftsync/shared";
 import {
   addMyAvailabilityException,
+  addMyAvailabilityExceptionsBatch,
   deleteMyAvailabilityException,
   getMyAvailability,
   getMyNotificationPrefs,
@@ -36,6 +38,7 @@ meRouter.get("/availability", authMiddleware, requireRoles("STAFF"), async (req:
       startAtUtc: e.startAtUtc.toISOString(),
       endAtUtc: e.endAtUtc.toISOString(),
       type: e.type,
+      tzIana: e.tzIana,
     })),
   });
 });
@@ -53,6 +56,38 @@ meRouter.put("/availability/rules", authMiddleware, requireRoles("STAFF"), async
   }
   await replaceMyAvailabilityRules(uid, parsed.data.rules);
   res.json({ ok: true });
+});
+
+meRouter.post("/availability/exceptions/batch", authMiddleware, requireRoles("STAFF"), async (req: AuthedRequest, res) => {
+  const uid = req.user?.id;
+  if (!uid) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const parsed = AvailabilityExceptionBatchInputSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+  try {
+    const out = await addMyAvailabilityExceptionsBatch(uid, parsed.data);
+    res.status(201).json(out);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "INVALID_RANGE") {
+      res.status(400).json({ error: "End must be after start for each location." });
+      return;
+    }
+    if (msg === "INVALID_LOCAL_TIME") {
+      res.status(400).json({ error: "Invalid start or end local time." });
+      return;
+    }
+    if (msg === "INVALID_LOCATION") {
+      res.status(400).json({ error: "One or more locations are not valid for your account." });
+      return;
+    }
+    throw e;
+  }
 });
 
 meRouter.post("/availability/exceptions", authMiddleware, requireRoles("STAFF"), async (req: AuthedRequest, res) => {

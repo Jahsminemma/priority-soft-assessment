@@ -34,6 +34,10 @@ export const CreateInviteRequestSchema = z
     role: UserRoleSchema,
     desiredHoursWeekly: z.number().min(0).max(80).nullable().optional(),
     managerLocationIds: z.array(z.string().uuid()).optional(),
+    /** Required when role is STAFF: at least one skill from the catalog. */
+    staffSkillIds: z.array(z.string().uuid()).optional(),
+    /** Required when role is STAFF: at least one location where they are certified. */
+    staffLocationIds: z.array(z.string().uuid()).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.role === "MANAGER" && (data.managerLocationIds?.length ?? 0) < 1) {
@@ -41,6 +45,20 @@ export const CreateInviteRequestSchema = z
         code: z.ZodIssueCode.custom,
         message: "Pick at least one location for a manager.",
         path: ["managerLocationIds"],
+      });
+    }
+    if (data.role === "STAFF" && (data.staffSkillIds?.length ?? 0) < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pick at least one skill for staff.",
+        path: ["staffSkillIds"],
+      });
+    }
+    if (data.role === "STAFF" && (data.staffLocationIds?.length ?? 0) < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pick at least one location for staff.",
+        path: ["staffLocationIds"],
       });
     }
   });
@@ -68,3 +86,46 @@ export const RegisterCompleteRequestSchema = z.object({
 });
 
 export type RegisterCompleteRequest = z.infer<typeof RegisterCompleteRequestSchema>;
+
+export const TeamLocationSummarySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+});
+
+export const TeamSkillSummarySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+});
+
+export const TeamManagerRowSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  email: z.string().email(),
+  locations: z.array(TeamLocationSummarySchema),
+  /** Managers are not assigned shift skills in this model; always empty. */
+  skills: z.array(TeamSkillSummarySchema),
+});
+
+export const TeamStaffRowSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  email: z.string().email(),
+  desiredHoursWeekly: z.number().nullable(),
+  skills: z.array(TeamSkillSummarySchema),
+  /** Certified work locations (StaffCertification). */
+  locations: z.array(TeamLocationSummarySchema),
+});
+
+/** Admin replaces all certified locations for a staff member. */
+export const StaffLocationsPatchRequestSchema = z.object({
+  locationIds: z.array(z.string().uuid()).min(1),
+});
+
+export type StaffLocationsPatchRequest = z.infer<typeof StaffLocationsPatchRequestSchema>;
+
+export const TeamListResponseSchema = z.object({
+  managers: z.array(TeamManagerRowSchema),
+  staff: z.array(TeamStaffRowSchema),
+});
+
+export type TeamListResponse = z.infer<typeof TeamListResponseSchema>;

@@ -8,11 +8,52 @@ import {
 } from "../../domain/scheduling/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { emitAssignmentChanged, emitAssignmentConflict } from "../../realtime/events.js";
+import { canModifyShift } from "../shifts/shift.service.js";
 import { createNotification } from "../notifications/notification.service.js";
+import type { AuthedUser } from "../../security/index.js";
+
+function gateResponseFromModifyShift(
+  gate: Awaited<ReturnType<typeof canModifyShift>>,
+): AssignmentPreviewResponse | null {
+  if (gate.ok) return null;
+  if (gate.code === "PAST_CUTOFF") {
+    return {
+      ok: false,
+      hardViolations: [
+        {
+          code: "SCHEDULE_CUTOFF",
+          message:
+            "This shift is on a published schedule and the edit window has closed (default: 48 hours before the shift starts). Unpublish the week to make changes, or ask an administrator.",
+          severity: "hard",
+        },
+      ],
+      warnings: [],
+      alternatives: [],
+      ineligibleCandidates: [],
+    };
+  }
+  return {
+    ok: false,
+    hardViolations: [
+      {
+        code: "SHIFT_NOT_FOUND",
+        message:
+          gate.code === "FORBIDDEN"
+            ? "You can’t manage assignments for this location."
+            : "This shift no longer exists. Refresh the schedule and try again.",
+        severity: "hard",
+      },
+    ],
+    warnings: [],
+    alternatives: [],
+    ineligibleCandidates: [],
+  };
+}
 
 export async function previewAssignment(
   shiftId: string,
   staffUserId: string,
+  actor: AuthedUser,
 ): Promise<AssignmentPreviewResponse> {
   const shiftSlot = await prisma.shift.findUnique({
     where: { id: shiftId },
@@ -33,6 +74,10 @@ export async function previewAssignment(
       ineligibleCandidates: [],
     };
   }
+  const gate = await canModifyShift(actor, shiftId);
+  const gated = gateResponseFromModifyShift(gate);
+  if (gated) return gated;
+
   if (shiftSlot._count.assignments >= shiftSlot.headcount) {
     return {
       ok: false,
@@ -66,12 +111,50 @@ export async function previewAssignment(
   };
 }
 
+export async function removeAssignment(
+  assignmentId: string,
+  actor: AuthedUser,
+): Promise<{ ok: true } | { ok: false; reason: "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF" }> {
+  const row = await prisma.shiftAssignment.findUnique({
+    where: { id: assignmentId },
+    include: { shift: { select: { id: true, locationId: true } } },
+  });
+  if (!row) return { ok: false, reason: "NOT_FOUND" };
+
+  const gate = await canModifyShift(actor, row.shiftId);
+  if (!gate.ok) {
+    if (gate.code === "PAST_CUTOFF") return { ok: false, reason: "PAST_CUTOFF" };
+    return { ok: false, reason: "FORBIDDEN" };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.shiftAssignment.delete({ where: { id: assignmentId } });
+    await tx.auditLog.create({
+      data: {
+        actorUserId: actor.id,
+        entityType: "ShiftAssignment",
+        entityId: assignmentId,
+        action: "DELETE",
+        beforeJson: { shiftId: row.shiftId, staffUserId: row.staffUserId } as Prisma.InputJsonValue,
+      },
+    });
+  });
+
+  emitAssignmentChanged(row.shift.locationId, {
+    shiftId: row.shiftId,
+    staffUserId: row.staffUserId,
+    assignmentId,
+  });
+
+  return { ok: true };
+}
+
 export async function commitAssignment(
   shiftId: string,
   staffUserId: string,
   idempotencyKey: string,
   seventhDayOverrideReason: string | undefined,
-  actorUserId: string,
+  actor: AuthedUser,
 ): Promise<AssignmentCommitResponse> {
   const existing = await prisma.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
   if (existing) {
@@ -91,6 +174,39 @@ export async function commitAssignment(
       message: "Shift not found.",
     };
   }
+
+  const modifyGate = await canModifyShift(actor, shiftId);
+  if (!modifyGate.ok) {
+    if (modifyGate.code === "PAST_CUTOFF") {
+      return {
+        success: false,
+        hardViolations: [
+          {
+            code: "SCHEDULE_CUTOFF",
+            message:
+              "This shift is on a published schedule and the edit window has closed. Unpublish the week or ask an administrator.",
+            severity: "hard",
+          },
+        ],
+        warnings: [],
+      };
+    }
+    return {
+      success: false,
+      hardViolations: [
+        {
+          code: "SHIFT_NOT_FOUND",
+          message:
+            modifyGate.code === "FORBIDDEN"
+              ? "You can’t manage assignments for this location."
+              : "Shift not found.",
+          severity: "hard",
+        },
+      ],
+      warnings: [],
+    };
+  }
+
   if (shiftSlot._count.assignments >= shiftSlot.headcount) {
     return {
       success: false,
@@ -109,10 +225,15 @@ export async function commitAssignment(
   const { hard, warnings } = evaluateAssignmentConstraints(constraintContext, { seventhDayOverrideReason });
 
   if (hard.length > 0) {
+    const alternatives = await findAlternatives(shiftId, 5);
+    const eligibleIds = new Set(alternatives.map((a) => a.staffUserId));
+    const ineligibleCandidates = await findIneligibleCandidates(shiftId, staffUserId, eligibleIds, 6);
     const res: AssignmentCommitResponse = {
       success: false,
       hardViolations: hard,
       warnings,
+      alternatives,
+      ineligibleCandidates,
     };
     return res;
   }
@@ -131,7 +252,7 @@ export async function commitAssignment(
 
       await tx.auditLog.create({
         data: {
-          actorUserId,
+          actorUserId: actor.id,
           entityType: "ShiftAssignment",
           entityId: created.id,
           action: "CREATE",
@@ -288,6 +409,7 @@ async function findAlternatives(
       certifications: { some: { locationId: shift.locationId } },
     },
     take: 50,
+    orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
 
@@ -299,7 +421,7 @@ async function findAlternatives(
       out.push({
         staffUserId: c.id,
         name: c.name,
-        reason: "Eligible: has the required skill, location certification, availability for this time, and no scheduling conflicts.",
+        reason: "Has the required skill, site certification, availability for this time, and no scheduling conflicts.",
       });
       if (out.length >= limit) break;
     }
@@ -326,6 +448,7 @@ async function findIneligibleCandidates(
       certifications: { some: { locationId: shift.locationId } },
     },
     take: 50,
+    orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
 

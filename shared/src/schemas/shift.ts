@@ -23,6 +23,8 @@ export const ShiftDtoSchema = z.object({
   status: ShiftStatusSchema,
   weekKey: z.string(),
   createdById: z.string().uuid().nullable(),
+  /** Present on manager/admin list responses: current assignment count. */
+  assignedCount: z.number().int().min(0).optional(),
 });
 
 export type ShiftDto = z.infer<typeof ShiftDtoSchema>;

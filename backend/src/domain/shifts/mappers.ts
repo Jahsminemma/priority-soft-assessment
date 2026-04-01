@@ -1,7 +1,7 @@
 import type { ShiftDto } from "@shiftsync/shared";
 import type { ShiftRecord } from "./types.js";
 
-export function shiftRecordToDto(record: ShiftRecord): ShiftDto {
+export function shiftRecordToDto(record: ShiftRecord, opts?: { assignedCount?: number }): ShiftDto {
   return {
     id: record.id,
     locationId: record.locationId,
@@ -13,5 +13,6 @@ export function shiftRecordToDto(record: ShiftRecord): ShiftDto {
     status: record.status,
     weekKey: record.weekKey,
     createdById: record.createdById,
+    ...(opts?.assignedCount !== undefined ? { assignedCount: opts.assignedCount } : {}),
   };
 }

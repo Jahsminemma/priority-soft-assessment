@@ -1,1 +1,1 @@
-export { previewAssignment, commitAssignment } from "./assignment.service.js";
+export { previewAssignment, commitAssignment, removeAssignment } from "./assignment.service.js";

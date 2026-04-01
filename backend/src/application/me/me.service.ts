@@ -1,7 +1,20 @@
 import { Prisma } from "@prisma/client";
-import type { AvailabilityExceptionInput, NotificationPrefs } from "@shiftsync/shared";
+import type {
+  AvailabilityExceptionBatchInput,
+  AvailabilityExceptionInput,
+  NotificationPrefs,
+} from "@shiftsync/shared";
+import { DateTime } from "luxon";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { createNotification } from "../notifications/notification.service.js";
+
+function exceptionWallLocalToUtcIso(datetimeLocal: string, zone: string): string | null {
+  const raw = datetimeLocal.trim();
+  if (!raw) return null;
+  const dt = DateTime.fromISO(raw, { zone });
+  if (!dt.isValid) return null;
+  return dt.toUTC().toISO() ?? null;
+}
 
 export async function getMyAvailability(userId: string): Promise<{
   rules: Array<{
@@ -15,6 +28,7 @@ export async function getMyAvailability(userId: string): Promise<{
     startAtUtc: Date;
     endAtUtc: Date;
     type: string;
+    tzIana: string | null;
   }>;
 }> {
   const [rules, exceptions] = await Promise.all([
@@ -79,10 +93,78 @@ export async function addMyAvailabilityException(
       startAtUtc: start,
       endAtUtc: end,
       type: input.type,
+      tzIana: input.tzIana ?? null,
     },
   });
   await notifyManagersOfAvailabilityChange(userId);
   return { id: row.id };
+}
+
+/**
+ * Creates one exception per distinct (UTC range, type, tz) among the selected certified locations
+ * (same wall times in each location’s zone; duplicates collapse when two sites share a timezone).
+ */
+export async function addMyAvailabilityExceptionsBatch(
+  userId: string,
+  input: AvailabilityExceptionBatchInput,
+): Promise<{ ids: string[] }> {
+  const uniqueLocationIds = [...new Set(input.locationIds)];
+  const certs = await prisma.staffCertification.findMany({
+    where: { userId, locationId: { in: uniqueLocationIds } },
+    select: { locationId: true },
+  });
+  const allowed = new Set(certs.map((c) => c.locationId));
+  for (const id of uniqueLocationIds) {
+    if (!allowed.has(id)) throw new Error("INVALID_LOCATION");
+  }
+
+  const locations = await prisma.location.findMany({
+    where: { id: { in: uniqueLocationIds } },
+    select: { id: true, tzIana: true },
+  });
+  const tzByLocation = new Map(locations.map((l) => [l.id, l.tzIana]));
+
+  type Row = { startAtUtc: Date; endAtUtc: Date; type: typeof input.type; tzIana: string };
+  const pending: Row[] = [];
+  const seen = new Set<string>();
+
+  for (const locId of uniqueLocationIds) {
+    const zone = tzByLocation.get(locId);
+    if (!zone) throw new Error("INVALID_LOCATION");
+    const startAtUtc = exceptionWallLocalToUtcIso(input.startLocal, zone);
+    const endAtUtc = exceptionWallLocalToUtcIso(input.endLocal, zone);
+    if (!startAtUtc || !endAtUtc) throw new Error("INVALID_LOCAL_TIME");
+    if (new Date(endAtUtc) <= new Date(startAtUtc)) throw new Error("INVALID_RANGE");
+    const key = `${startAtUtc}\0${endAtUtc}\0${input.type}\0${zone}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pending.push({
+      startAtUtc: new Date(startAtUtc),
+      endAtUtc: new Date(endAtUtc),
+      type: input.type,
+      tzIana: zone,
+    });
+  }
+
+  if (pending.length === 0) {
+    return { ids: [] };
+  }
+
+  const rows = await prisma.$transaction(
+    pending.map((p) =>
+      prisma.availabilityException.create({
+        data: {
+          userId,
+          startAtUtc: p.startAtUtc,
+          endAtUtc: p.endAtUtc,
+          type: p.type,
+          tzIana: p.tzIana,
+        },
+      }),
+    ),
+  );
+  await notifyManagersOfAvailabilityChange(userId);
+  return { ids: rows.map((r) => r.id) };
 }
 
 export async function deleteMyAvailabilityException(userId: string, exceptionId: string): Promise<boolean> {
