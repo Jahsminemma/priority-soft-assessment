@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeIsoWeekKey } from "../weekKey.js";
 
 export const ShiftStatusSchema = z.enum(["DRAFT", "PUBLISHED"]);
 export type ShiftStatus = z.infer<typeof ShiftStatusSchema>;
@@ -32,7 +33,7 @@ export const CreateShiftRequestSchema = z.object({
   endAtUtc: z.string().datetime(),
   requiredSkillId: z.string().uuid(),
   headcount: z.number().int().positive(),
-  weekKey: z.string().min(1),
+  weekKey: z.string().min(1).transform(normalizeIsoWeekKey),
   isPremium: z.boolean().optional(),
 });
 
@@ -40,14 +41,14 @@ export type CreateShiftRequest = z.infer<typeof CreateShiftRequestSchema>;
 
 export const ListShiftsQuerySchema = z.object({
   locationId: z.string().uuid(),
-  weekKey: z.string().min(1),
+  weekKey: z.string().min(1).transform(normalizeIsoWeekKey),
 });
 
 export type ListShiftsQuery = z.infer<typeof ListShiftsQuerySchema>;
 
 /** Staff: published shifts only, scoped to certified locations. */
 export const ListShiftsStaffQuerySchema = z.object({
-  weekKey: z.string().min(1),
+  weekKey: z.string().min(1).transform(normalizeIsoWeekKey),
 });
 
 export type ListShiftsStaffQuery = z.infer<typeof ListShiftsStaffQuerySchema>;

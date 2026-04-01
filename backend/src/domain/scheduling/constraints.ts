@@ -27,6 +27,8 @@ export type ConstraintContext = {
   shift: ShiftIntervalInput;
   requiredSkillId: string;
   staffUserId: string;
+  /** For clearer violation copy (e.g. "Sam is not certified…"). */
+  staffDisplayName?: string;
   staffSkillIds: string[];
   certifiedLocationIds: string[];
   availabilityRules: AvailabilityRuleInput[];
@@ -126,6 +128,11 @@ export function minGapBetweenNonOverlapping(
   return null;
 }
 
+function staffWho(ctx: ConstraintContext): string {
+  const n = ctx.staffDisplayName?.trim();
+  return n && n.length > 0 ? n : "This staff member";
+}
+
 export function evaluateAssignmentConstraints(
   ctx: ConstraintContext,
   opts: { seventhDayOverrideReason?: string | undefined },
@@ -133,11 +140,12 @@ export function evaluateAssignmentConstraints(
   const hard: ConstraintViolation[] = [];
   const warnings: ConstraintViolation[] = [];
   const { shift, requiredSkillId, staffSkillIds, certifiedLocationIds, locationId } = ctx;
+  const who = staffWho(ctx);
 
   if (!staffSkillIds.includes(requiredSkillId)) {
     hard.push({
       code: "MISSING_SKILL",
-      message: "Staff does not have the required skill for this shift.",
+      message: `${who} does not have the skill required for this shift (the role is not on their profile).`,
       severity: "hard",
     });
   }
@@ -145,7 +153,7 @@ export function evaluateAssignmentConstraints(
   if (!certifiedLocationIds.includes(locationId)) {
     hard.push({
       code: "NOT_CERTIFIED",
-      message: "Staff is not certified for this shift's location.",
+      message: `${who} is not certified to work at this location, so they cannot be assigned here.`,
       severity: "hard",
     });
   }
@@ -153,7 +161,7 @@ export function evaluateAssignmentConstraints(
   if (isBlockedByUnavailableException(shift.startAtUtc, shift.endAtUtc, ctx.availabilityExceptions)) {
     hard.push({
       code: "OUTSIDE_AVAILABILITY",
-      message: "Staff marked unavailable during this time.",
+      message: `${who} has time off or an unavailability that covers this shift.`,
       severity: "hard",
     });
   }
@@ -166,15 +174,16 @@ export function evaluateAssignmentConstraints(
   if (segments.length === 0) {
     hard.push({
       code: "OUTSIDE_AVAILABILITY",
-      message: "Invalid shift time range.",
+      message: "The shift time range is invalid (could not be split into local days).",
       severity: "hard",
     });
   } else {
     for (const seg of segments) {
       if (!segmentCoveredByRules(seg.start, seg.end, ctx.availabilityRules)) {
+        const dayLabel = seg.start.toFormat("EEE, MMM d");
         hard.push({
           code: "OUTSIDE_AVAILABILITY",
-          message: `Shift falls outside recurring availability (local segment ${seg.start.toISO() ?? ""}).`,
+          message: `${who}’s recurring weekly availability does not cover this shift on ${dayLabel} (local time at the location).`,
           severity: "hard",
         });
         break;
@@ -214,13 +223,13 @@ export function evaluateAssignmentConstraints(
   if (foundDouble) {
     hard.push({
       code: "DOUBLE_BOOK",
-      message: "Staff is already assigned to an overlapping shift.",
+      message: `${who} is already assigned to another shift that overlaps this time.`,
       severity: "hard",
     });
   } else if (foundRest) {
     hard.push({
       code: "REST_10H",
-      message: `Less than ${REST_HOURS} hours between two assignments.`,
+      message: `${who} would have less than ${REST_HOURS} hours of rest between this shift and another assignment.`,
       severity: "hard",
     });
   }
@@ -231,7 +240,7 @@ export function evaluateAssignmentConstraints(
     if (minutes > 12 * 60) {
       hard.push({
         code: "DAILY_HARD_12H",
-        message: "Daily hours would exceed 12 hours (hard block).",
+        message: "With this assignment, daily hours at the location would exceed 12 hours (hard limit).",
         severity: "hard",
       });
       break;
@@ -239,7 +248,7 @@ export function evaluateAssignmentConstraints(
     if (minutes > 8 * 60) {
       warnings.push({
         code: "DAILY_WARN_8H",
-        message: "Daily hours exceed 8 hours (warning).",
+        message: "With this assignment, daily hours would exceed 8 hours on that day (warning).",
         severity: "warn",
       });
     }
@@ -253,14 +262,14 @@ export function evaluateAssignmentConstraints(
   if (weeklyMinutes >= 35 * 60 && weeklyMinutes < 40 * 60) {
     warnings.push({
       code: "WEEKLY_WARN_35",
-      message: "Weekly hours approaching 40 (warning at 35+).",
+      message: "Weekly hours in this ISO week would reach 35+ before 40 (approaching overtime threshold).",
       severity: "warn",
     });
   }
   if (weeklyMinutes >= 40 * 60) {
     warnings.push({
       code: "WEEKLY_WARN_40",
-      message: "Weekly hours at or above 40 (overtime risk).",
+      message: "Weekly hours in this ISO week would be at or above 40 (overtime risk).",
       severity: "warn",
     });
   }
@@ -273,7 +282,7 @@ export function evaluateAssignmentConstraints(
   if (consecutive === 6) {
     warnings.push({
       code: "CONSECUTIVE_SIXTH_DAY",
-      message: "6th consecutive day worked in the week (warning).",
+      message: "This would be a 6th consecutive work day in the week (policy warning).",
       severity: "warn",
     });
   }
@@ -282,7 +291,7 @@ export function evaluateAssignmentConstraints(
     if (!reason) {
       hard.push({
         code: "WEEKLY_SEVENTH_DAY",
-        message: "7th consecutive day worked requires manager override with documented reason.",
+        message: "A 7th consecutive work day in the week is blocked unless you add a documented manager reason below.",
         severity: "hard",
       });
     }

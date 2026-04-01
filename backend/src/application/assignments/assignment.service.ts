@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { AssignmentCommitResponse, AssignmentPreviewResponse } from "@shiftsync/shared";
+import { CONSTRAINT_RULE_TITLES } from "@shiftsync/shared";
 import {
   evaluateAssignmentConstraints,
   type ConstraintContext,
@@ -13,15 +14,55 @@ export async function previewAssignment(
   shiftId: string,
   staffUserId: string,
 ): Promise<AssignmentPreviewResponse> {
+  const shiftSlot = await prisma.shift.findUnique({
+    where: { id: shiftId },
+    include: { _count: { select: { assignments: true } } },
+  });
+  if (!shiftSlot) {
+    return {
+      ok: false,
+      hardViolations: [
+        {
+          code: "SHIFT_NOT_FOUND",
+          message: "This shift no longer exists. Refresh the schedule and try again.",
+          severity: "hard",
+        },
+      ],
+      warnings: [],
+      alternatives: [],
+      ineligibleCandidates: [],
+    };
+  }
+  if (shiftSlot._count.assignments >= shiftSlot.headcount) {
+    return {
+      ok: false,
+      hardViolations: [
+        {
+          code: "HEADCOUNT_FULL",
+          message: `This shift is already fully staffed (${shiftSlot.headcount} of ${shiftSlot.headcount} slots).`,
+          severity: "hard",
+        },
+      ],
+      warnings: [],
+      alternatives: [],
+      ineligibleCandidates: [],
+    };
+  }
+
   const constraintContext = await buildConstraintContext(shiftId, staffUserId);
   const { hard, warnings } = evaluateAssignmentConstraints(constraintContext, {});
   const ok = hard.length === 0;
   const alternatives = ok ? [] : await findAlternatives(shiftId, 5);
+  const eligibleIds = new Set(alternatives.map((a) => a.staffUserId));
+  const ineligibleCandidates = ok
+    ? []
+    : await findIneligibleCandidates(shiftId, staffUserId, eligibleIds, 6);
   return {
     ok,
     hardViolations: hard,
     warnings,
     alternatives,
+    ineligibleCandidates,
   };
 }
 
@@ -35,6 +76,33 @@ export async function commitAssignment(
   const existing = await prisma.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
   if (existing) {
     return JSON.parse(JSON.stringify(existing.resultJson)) as AssignmentCommitResponse;
+  }
+
+  const shiftSlot = await prisma.shift.findUnique({
+    where: { id: shiftId },
+    include: { _count: { select: { assignments: true } } },
+  });
+  if (!shiftSlot) {
+    return {
+      success: false,
+      hardViolations: [],
+      warnings: [],
+      conflict: true,
+      message: "Shift not found.",
+    };
+  }
+  if (shiftSlot._count.assignments >= shiftSlot.headcount) {
+    return {
+      success: false,
+      hardViolations: [
+        {
+          code: "HEADCOUNT_FULL",
+          message: `This shift is already fully staffed (${shiftSlot.headcount} of ${shiftSlot.headcount} slots). Remove someone or raise headcount to add another person.`,
+          severity: "hard",
+        },
+      ],
+      warnings: [],
+    };
   }
 
   const constraintContext = await buildConstraintContext(shiftId, staffUserId);
@@ -135,6 +203,11 @@ export async function buildConstraintContext(
     include: { location: true, requiredSkill: true },
   });
 
+  const staffUser = await prisma.user.findUnique({
+    where: { id: staffUserId },
+    select: { name: true },
+  });
+
   const staffSkills = await prisma.staffSkill.findMany({
     where: { userId: staffUserId },
     select: { skillId: true },
@@ -180,6 +253,9 @@ export async function buildConstraintContext(
     shift: shiftInterval,
     requiredSkillId: shift.requiredSkillId,
     staffUserId,
+    ...(staffUser?.name != null && staffUser.name.trim() !== ""
+      ? { staffDisplayName: staffUser.name.trim() }
+      : {}),
     staffSkillIds: staffSkills.map((s) => s.skillId),
     certifiedLocationIds: certs.map((c) => c.locationId),
     availabilityRules: rules.map((r) => ({
@@ -223,10 +299,51 @@ async function findAlternatives(
       out.push({
         staffUserId: c.id,
         name: c.name,
-        reason: "Has required skill, certification, availability, and no conflicts.",
+        reason: "Eligible: has the required skill, location certification, availability for this time, and no scheduling conflicts.",
       });
       if (out.length >= limit) break;
     }
+  }
+  return out;
+}
+
+/** Other skill+location-qualified staff who are still blocked — helps managers compare options. */
+async function findIneligibleCandidates(
+  shiftId: string,
+  excludeStaffId: string,
+  eligibleIds: Set<string>,
+  limit: number,
+): Promise<Array<{ staffUserId: string; name: string; reason: string }>> {
+  const shift = await prisma.shift.findUniqueOrThrow({
+    where: { id: shiftId },
+    include: { location: true },
+  });
+
+  const candidates = await prisma.user.findMany({
+    where: {
+      role: "STAFF",
+      staffSkills: { some: { skillId: shift.requiredSkillId } },
+      certifications: { some: { locationId: shift.locationId } },
+    },
+    take: 50,
+    select: { id: true, name: true },
+  });
+
+  const out: Array<{ staffUserId: string; name: string; reason: string }> = [];
+  for (const c of candidates) {
+    if (c.id === excludeStaffId) continue;
+    if (eligibleIds.has(c.id)) continue;
+    const ctx = await buildConstraintContext(shiftId, c.id);
+    const { hard } = evaluateAssignmentConstraints(ctx, {});
+    if (hard.length === 0) continue;
+    const primary = hard[0]!;
+    const ruleLabel = CONSTRAINT_RULE_TITLES[primary.code] ?? primary.code;
+    out.push({
+      staffUserId: c.id,
+      name: c.name,
+      reason: `${ruleLabel}: ${primary.message}`,
+    });
+    if (out.length >= limit) break;
   }
   return out;
 }

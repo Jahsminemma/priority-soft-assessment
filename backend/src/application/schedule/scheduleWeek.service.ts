@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { isoWeekKeyDbVariants } from "@shiftsync/shared";
 import { weekStartDateLocalFromWeekKey } from "../../domain/scheduling/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { emitScheduleWeekUpdated } from "../../realtime/events.js";
@@ -26,7 +27,7 @@ export async function publishWeek(
       update: { status: "PUBLISHED", cutoffHours: cutoff },
     });
     await tx.shift.updateMany({
-      where: { locationId, weekKey },
+      where: { locationId, weekKey: { in: isoWeekKeyDbVariants(weekKey) } },
       data: { status: "PUBLISHED" },
     });
     await tx.auditLog.create({
@@ -62,7 +63,7 @@ export async function unpublishWeek(
       data: { status: "DRAFT" },
     });
     await tx.shift.updateMany({
-      where: { locationId, weekKey },
+      where: { locationId, weekKey: { in: isoWeekKeyDbVariants(weekKey) } },
       data: { status: "DRAFT" },
     });
     await tx.auditLog.create({

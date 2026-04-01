@@ -8,7 +8,7 @@ export function emitScheduleWeekUpdated(locationId: string, payload: { weekKey: 
 
 export function emitShiftUpdated(
   locationId: string,
-  payload: { shiftId: string; action: "created" | "updated" },
+  payload: { shiftId: string; action: "created" | "updated" | "deleted" },
 ): void {
   const s = getIo();
   if (!s) return;

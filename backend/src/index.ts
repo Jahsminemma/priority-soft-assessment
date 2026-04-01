@@ -34,6 +34,12 @@ app.use(
 );
 app.use(express.json());
 
+/** Avoid stale JSON in browser HTTP cache when switching weeks / refetching lists. */
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });

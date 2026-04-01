@@ -2,6 +2,7 @@ export type { ListAssignmentsResult } from "./shift.service.js";
 export {
   canModifyShift,
   createShift,
+  deleteShift,
   listAssignmentsForShift,
   listPublishedShiftsForStaff,
   listShiftsByLocationWeek,

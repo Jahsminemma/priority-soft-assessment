@@ -1,4 +1,6 @@
 import type { CreateShiftRequest, ShiftDto, UpdateShiftRequest } from "@shiftsync/shared";
+import { compareIsoWeekKeys, isoWeekKeyDbVariants, normalizeIsoWeekKey } from "@shiftsync/shared";
+import { DateTime } from "luxon";
 import { weekStartDateLocalFromWeekKey } from "../../domain/scheduling/index.js";
 import { shiftRecordToDto } from "../../domain/shifts/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
@@ -15,8 +17,9 @@ export async function listShiftsByLocationWeek(
     return null;
   }
 
+  const keys = isoWeekKeyDbVariants(weekKey);
   const shifts = await prisma.shift.findMany({
-    where: { locationId, weekKey },
+    where: { locationId, weekKey: { in: keys } },
     orderBy: { startAtUtc: "asc" },
   });
   return shifts.map(shiftRecordToDto);
@@ -31,8 +34,9 @@ export async function listPublishedShiftsForStaff(actor: AuthedUser, weekKey: st
   });
   const locIds = certs.map((c) => c.locationId);
   if (locIds.length === 0) return [];
+  const keys = isoWeekKeyDbVariants(weekKey);
   const shifts = await prisma.shift.findMany({
-    where: { weekKey, locationId: { in: locIds }, status: "PUBLISHED" },
+    where: { weekKey: { in: keys }, locationId: { in: locIds }, status: "PUBLISHED" },
     orderBy: { startAtUtc: "asc" },
   });
   return shifts.map(shiftRecordToDto);
@@ -75,6 +79,19 @@ export async function createShift(actor: AuthedUser, input: CreateShiftRequest):
 
   if (!location) throw new Error("LOCATION_NOT_FOUND");
   if (!skill) throw new Error("SKILL_NOT_FOUND");
+
+  const inputWeek = normalizeIsoWeekKey(input.weekKey);
+  const nowZ = DateTime.now().setZone(location.tzIana);
+  const currentWeekKey = normalizeIsoWeekKey(`${nowZ.weekYear}-W${String(nowZ.weekNumber).padStart(2, "0")}`);
+  if (compareIsoWeekKeys(inputWeek, currentWeekKey) < 0) {
+    throw new Error("WEEK_IN_PAST");
+  }
+
+  const startLocal = DateTime.fromJSDate(start, { zone: "utc" }).setZone(location.tzIana);
+  const todayStart = nowZ.startOf("day");
+  if (startLocal < todayStart) {
+    throw new Error("SHIFT_START_IN_PAST");
+  }
 
   const created = await prisma.$transaction(async (tx) => {
     const shift = await tx.shift.create({
@@ -152,6 +169,39 @@ export async function updateShift(
   await cancelCoverageForShift(shiftId, actor.id);
   emitShiftUpdated(updated.locationId, { shiftId, action: "updated" });
   return shiftRecordToDto(updated);
+}
+
+export type DeleteShiftError = "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF";
+
+export async function deleteShift(
+  actor: AuthedUser,
+  shiftId: string,
+): Promise<{ ok: true } | { error: DeleteShiftError }> {
+  const gate = await canModifyShift(actor, shiftId);
+  if (!gate.ok) {
+    return { error: gate.code };
+  }
+
+  const existing = await prisma.shift.findUnique({ where: { id: shiftId } });
+  if (!existing) return { error: "NOT_FOUND" };
+
+  await cancelCoverageForShift(shiftId, actor.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.shift.delete({ where: { id: shiftId } });
+    await tx.auditLog.create({
+      data: {
+        actorUserId: actor.id,
+        entityType: "Shift",
+        entityId: shiftId,
+        action: "DELETE",
+        beforeJson: shiftRecordToDto(existing) as object,
+      },
+    });
+  });
+
+  emitShiftUpdated(existing.locationId, { shiftId, action: "deleted" });
+  return { ok: true };
 }
 
 export type ListAssignmentsResult =

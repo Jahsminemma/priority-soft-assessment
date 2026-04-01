@@ -1,3 +1,4 @@
+import { isoWeekKeyDbVariants } from "@shiftsync/shared";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { canManageLocation, type AuthedUser } from "../../security/index.js";
 
@@ -23,9 +24,10 @@ export async function fairnessReport(
 ): Promise<FairnessRow[] | null> {
   if (!canManageLocation(actor, locationId)) return null;
 
+  const weekKeys = isoWeekKeyDbVariants(weekKey);
   const assignments = await prisma.shiftAssignment.findMany({
     where: {
-      shift: { locationId, weekKey },
+      shift: { locationId, weekKey: { in: weekKeys } },
     },
     include: {
       shift: true,
@@ -82,9 +84,10 @@ export async function overtimeWeekReport(
 ): Promise<OvertimeWeekRow[] | null> {
   if (!canManageLocation(actor, locationId)) return null;
 
+  const weekKeysOt = isoWeekKeyDbVariants(weekKey);
   const assignments = await prisma.shiftAssignment.findMany({
     where: {
-      shift: { locationId, weekKey },
+      shift: { locationId, weekKey: { in: weekKeysOt } },
     },
     include: {
       shift: true,

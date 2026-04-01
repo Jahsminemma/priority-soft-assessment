@@ -12,12 +12,34 @@ export const ConstraintViolationCodeSchema = z.enum([
   "WEEKLY_WARN_40",
   "CONSECUTIVE_SIXTH_DAY",
   "WEEKLY_SEVENTH_DAY",
+  /** Shift already has assignments equal to headcount. */
+  "HEADCOUNT_FULL",
+  /** Preview/commit target shift does not exist (or was removed). */
+  "SHIFT_NOT_FOUND",
 ]);
 
 export type ConstraintViolationCode = z.infer<typeof ConstraintViolationCodeSchema>;
 
+/** Short, stable labels for UI — which policy is being enforced. */
+export const CONSTRAINT_RULE_TITLES: Record<ConstraintViolationCode, string> = {
+  DOUBLE_BOOK: "One shift at a time",
+  REST_10H: "Minimum rest between shifts",
+  MISSING_SKILL: "Required skill",
+  NOT_CERTIFIED: "Location certification",
+  OUTSIDE_AVAILABILITY: "Availability & time off",
+  DAILY_HARD_12H: "Daily hours limit",
+  DAILY_WARN_8H: "Long day warning",
+  WEEKLY_WARN_35: "Weekly hours (approaching 40)",
+  WEEKLY_WARN_40: "Weekly hours (overtime risk)",
+  CONSECUTIVE_SIXTH_DAY: "Consecutive work days",
+  WEEKLY_SEVENTH_DAY: "Seventh day in a row",
+  HEADCOUNT_FULL: "Shift is fully staffed",
+  SHIFT_NOT_FOUND: "Shift not found",
+};
+
 export const ConstraintViolationSchema = z.object({
   code: ConstraintViolationCodeSchema,
+  /** Human-readable explanation: what went wrong for this assignment attempt. */
   message: z.string(),
   severity: z.enum(["hard", "warn"]),
 });
@@ -41,7 +63,13 @@ export const AssignmentPreviewResponseSchema = z.object({
   ok: z.boolean(),
   hardViolations: z.array(ConstraintViolationSchema),
   warnings: z.array(ConstraintViolationSchema),
+  /** Staff who pass all checks — safe to assign. */
   alternatives: z.array(StaffAlternativeSchema),
+  /**
+   * Other staff with the required skill and location cert who still cannot be assigned,
+   * with a concise reason (which rule blocks them). Helps compare options when the first pick fails.
+   */
+  ineligibleCandidates: z.array(StaffAlternativeSchema),
 });
 
 export type AssignmentPreviewResponse = z.infer<typeof AssignmentPreviewResponseSchema>;

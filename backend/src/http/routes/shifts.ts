@@ -8,6 +8,7 @@ import {
 } from "@shiftsync/shared";
 import {
   createShift,
+  deleteShift,
   listAssignmentsForShift,
   listPublishedShiftsForStaff,
   listShiftsByLocationWeek,
@@ -113,8 +114,42 @@ shiftsRouter.post(
         res.status(404).json({ error: msg });
         return;
       }
+      if (msg === "WEEK_IN_PAST") {
+        res.status(400).json({ error: "Schedule only for this week or a future week." });
+        return;
+      }
+      if (msg === "SHIFT_START_IN_PAST") {
+        res.status(400).json({ error: "Shift start date cannot be in the past." });
+        return;
+      }
       throw e;
     }
+  },
+);
+
+shiftsRouter.delete(
+  "/:id",
+  authMiddleware,
+  requireRoles("ADMIN", "MANAGER"),
+  async (req: AuthedRequest, res) => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const sid = singleParam(req.params["id"]);
+    if (!sid) {
+      res.status(400).json({ error: "Missing shift id" });
+      return;
+    }
+    const out = await deleteShift(user, sid);
+    if ("error" in out) {
+      const status =
+        out.error === "NOT_FOUND" ? 404 : out.error === "PAST_CUTOFF" ? 400 : 403;
+      res.status(status).json({ error: out.error });
+      return;
+    }
+    res.status(204).send();
   },
 );
 
