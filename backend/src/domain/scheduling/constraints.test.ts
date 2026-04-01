@@ -117,6 +117,86 @@ describe("evaluateAssignmentConstraints", () => {
     );
     expect(hard.some((h) => h.code === "OUTSIDE_AVAILABILITY")).toBe(false);
   });
+
+  it("emits one daily >8h warning even if multiple days exceed 8h", () => {
+    const { warnings } = evaluateAssignmentConstraints(
+      {
+        ...baseCtx,
+        shift: {
+          ...baseCtx.shift,
+          startAtUtc: new Date("2026-03-02T17:00:00Z"),
+          endAtUtc: new Date("2026-03-03T02:30:00Z"),
+        },
+        otherAssignments: [
+          {
+            shiftId: "s-next-day",
+            startAtUtc: new Date("2026-03-03T17:00:00Z"),
+            endAtUtc: new Date("2026-03-04T02:30:00Z"),
+            locationTzIana: "America/Los_Angeles",
+          },
+        ],
+      },
+      {},
+    );
+    const dailyWarns = warnings.filter((w) => w.code === "DAILY_WARN_8H");
+    expect(dailyWarns).toHaveLength(1);
+    expect(dailyWarns[0]?.message).toContain("9.5h");
+  });
+
+  it("shows projected weekly hours in overtime warning", () => {
+    const { warnings } = evaluateAssignmentConstraints(
+      {
+        ...baseCtx,
+        shift: {
+          ...baseCtx.shift,
+          startAtUtc: new Date("2026-03-06T18:00:00Z"),
+          endAtUtc: new Date("2026-03-07T02:00:00Z"),
+        },
+        otherAssignments: [
+          {
+            shiftId: "s-mon",
+            startAtUtc: new Date("2026-03-02T18:00:00Z"),
+            endAtUtc: new Date("2026-03-03T02:00:00Z"),
+            locationTzIana: "America/Los_Angeles",
+          },
+          {
+            shiftId: "s-tue",
+            startAtUtc: new Date("2026-03-03T18:00:00Z"),
+            endAtUtc: new Date("2026-03-04T02:00:00Z"),
+            locationTzIana: "America/Los_Angeles",
+          },
+          {
+            shiftId: "s-wed",
+            startAtUtc: new Date("2026-03-04T18:00:00Z"),
+            endAtUtc: new Date("2026-03-05T02:00:00Z"),
+            locationTzIana: "America/Los_Angeles",
+          },
+          {
+            shiftId: "s-thu",
+            startAtUtc: new Date("2026-03-05T18:00:00Z"),
+            endAtUtc: new Date("2026-03-06T02:00:00Z"),
+            locationTzIana: "America/Los_Angeles",
+          },
+          {
+            shiftId: "s-fri-pre",
+            startAtUtc: new Date("2026-03-07T03:00:00Z"),
+            endAtUtc: new Date("2026-03-07T07:00:00Z"),
+            locationTzIana: "America/Los_Angeles",
+          },
+          {
+            shiftId: "s-sun",
+            startAtUtc: new Date("2026-03-08T18:00:00Z"),
+            endAtUtc: new Date("2026-03-09T02:00:00Z"),
+            locationTzIana: "America/Los_Angeles",
+          },
+        ],
+      },
+      {},
+    );
+    const overtime = warnings.find((w) => w.code === "WEEKLY_WARN_40");
+    expect(overtime).toBeDefined();
+    expect(overtime?.message).toContain("52.0h");
+  });
 });
 
 describe("splitShiftIntoLocalDaySegments", () => {

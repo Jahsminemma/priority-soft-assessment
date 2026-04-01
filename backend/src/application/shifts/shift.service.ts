@@ -1,7 +1,13 @@
+import type { Prisma } from "@prisma/client";
 import type { CreateShiftRequest, ShiftDto, UpdateShiftRequest } from "@shiftsync/shared";
 import { compareIsoWeekKeys, isoWeekKeyDbVariants, normalizeIsoWeekKey } from "@shiftsync/shared";
 import { DateTime } from "luxon";
-import { weekStartDateLocalFromWeekKey } from "../../domain/scheduling/index.js";
+import {
+  evaluateAssignmentConstraints,
+  weekStartDateLocalFromWeekKey,
+  type ConstraintContext,
+  type ShiftIntervalInput,
+} from "../../domain/scheduling/index.js";
 import { shiftRecordToDto } from "../../domain/shifts/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { emitShiftUpdated } from "../../realtime/events.js";
@@ -26,25 +32,110 @@ export async function listShiftsByLocationWeek(
   return shifts.map((s) => shiftRecordToDto(s, { assignedCount: s._count.assignments }));
 }
 
-/** Published shifts at locations the staff member is certified for. */
+/** Published shifts this staff member is assigned to (and only for published weeks). */
 export async function listPublishedShiftsForStaff(actor: AuthedUser, weekKey: string): Promise<ShiftDto[]> {
   if (actor.role !== "STAFF") return [];
-  const certs = await prisma.staffCertification.findMany({
-    where: { userId: actor.id },
+  const keys = isoWeekKeyDbVariants(weekKey);
+  const assignments = await prisma.shiftAssignment.findMany({
+    where: {
+      staffUserId: actor.id,
+      status: "ASSIGNED",
+      shift: {
+        weekKey: { in: keys },
+        status: "PUBLISHED",
+      },
+    },
+    include: {
+      shift: {
+        include: { location: true },
+      },
+    },
+  });
+  if (assignments.length === 0) return [];
+
+  const byLocation = new Map<string, string>();
+  for (const a of assignments) {
+    if (byLocation.has(a.shift.locationId)) continue;
+    byLocation.set(a.shift.locationId, weekStartDateLocalFromWeekKey(weekKey, a.shift.location.tzIana));
+  }
+  const publishedWeekTuples = [...byLocation.entries()].map(([locationId, weekStartDateLocal]) => ({
+    locationId,
+    weekStartDateLocal,
+    status: "PUBLISHED" as const,
+  }));
+  const publishedWeeks = await prisma.scheduleWeek.findMany({
+    where: { OR: publishedWeekTuples },
     select: { locationId: true },
   });
-  const locIds = certs.map((c) => c.locationId);
-  if (locIds.length === 0) return [];
-  const keys = isoWeekKeyDbVariants(weekKey);
-  const shifts = await prisma.shift.findMany({
-    where: { weekKey: { in: keys }, locationId: { in: locIds }, status: "PUBLISHED" },
-    orderBy: { startAtUtc: "asc" },
-  });
-  return shifts.map((s) => shiftRecordToDto(s));
+  const publishedLocationIds = new Set(publishedWeeks.map((w) => w.locationId));
+  if (publishedLocationIds.size === 0) return [];
+
+  return assignments
+    .map((a) => a.shift)
+    .filter((s) => publishedLocationIds.has(s.locationId))
+    .sort((a, b) => a.startAtUtc.getTime() - b.startAtUtc.getTime())
+    .map((s) => shiftRecordToDto(s));
 }
 
 export type ModifyShiftGate = { ok: true } | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF" };
 export type UpdateShiftError = "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF";
+
+async function buildConstraintContextForShiftTx(
+  tx: Prisma.TransactionClient,
+  staffUserId: string,
+  shift: { id: string; locationId: string; requiredSkillId: string; startAtUtc: Date; endAtUtc: Date; locationTzIana: string },
+): Promise<ConstraintContext> {
+  const [staffUser, staffSkills, certs, rules, exceptions, assignments] = await Promise.all([
+    tx.user.findUnique({ where: { id: staffUserId }, select: { name: true } }),
+    tx.staffSkill.findMany({ where: { userId: staffUserId }, select: { skillId: true } }),
+    tx.staffCertification.findMany({ where: { userId: staffUserId }, select: { locationId: true } }),
+    tx.availabilityRule.findMany({ where: { userId: staffUserId } }),
+    tx.availabilityException.findMany({ where: { userId: staffUserId } }),
+    tx.shiftAssignment.findMany({
+      where: {
+        staffUserId,
+        status: "ASSIGNED",
+        shiftId: { not: shift.id },
+      },
+      include: { shift: { include: { location: true } } },
+    }),
+  ]);
+
+  const otherAssignments: ShiftIntervalInput[] = assignments.map((a) => ({
+    shiftId: a.shiftId,
+    startAtUtc: a.shift.startAtUtc,
+    endAtUtc: a.shift.endAtUtc,
+    locationTzIana: a.shift.location.tzIana,
+  }));
+
+  const shiftInterval: ShiftIntervalInput = {
+    shiftId: shift.id,
+    startAtUtc: shift.startAtUtc,
+    endAtUtc: shift.endAtUtc,
+    locationTzIana: shift.locationTzIana,
+  };
+
+  return {
+    locationId: shift.locationId,
+    shift: shiftInterval,
+    requiredSkillId: shift.requiredSkillId,
+    staffUserId,
+    ...(staffUser?.name ? { staffDisplayName: staffUser.name } : {}),
+    staffSkillIds: staffSkills.map((s) => s.skillId),
+    certifiedLocationIds: certs.map((c) => c.locationId),
+    availabilityRules: rules.map((r) => ({
+      dayOfWeek: r.dayOfWeek,
+      startLocalTime: r.startLocalTime,
+      endLocalTime: r.endLocalTime,
+    })),
+    availabilityExceptions: exceptions.map((x) => ({
+      startAtUtc: x.startAtUtc,
+      endAtUtc: x.endAtUtc,
+      type: x.type,
+    })),
+    otherAssignments,
+  };
+}
 
 export async function canModifyShift(actor: AuthedUser, shiftId: string): Promise<ModifyShiftGate> {
   const shift = await prisma.shift.findUnique({ where: { id: shiftId }, include: { location: true } });
@@ -136,13 +227,48 @@ export async function updateShift(
     return { error: gate.code };
   }
 
-  const existing = await prisma.shift.findUnique({ where: { id: shiftId } });
+  const existing = await prisma.shift.findUnique({ where: { id: shiftId }, include: { location: true } });
   if (!existing) return { error: "NOT_FOUND" };
 
   const start = patch.startAtUtc ? new Date(patch.startAtUtc) : existing.startAtUtc;
   const end = patch.endAtUtc ? new Date(patch.endAtUtc) : existing.endAtUtc;
   if (!(end > start)) {
     throw new Error("INVALID_RANGE");
+  }
+
+  const assignedRows = await prisma.shiftAssignment.findMany({
+    where: { shiftId, status: "ASSIGNED" },
+    select: {
+      staffUserId: true,
+      staff: { select: { name: true } },
+    },
+  });
+  if (assignedRows.length > 0) {
+    const proposedShift = {
+      id: shiftId,
+      locationId: existing.locationId,
+      requiredSkillId: existing.requiredSkillId,
+      startAtUtc: start,
+      endAtUtc: end,
+      locationTzIana: existing.location.tzIana,
+    };
+    const firstViolation = await prisma.$transaction(async (tx) => {
+      for (const row of assignedRows) {
+        const ctx = await buildConstraintContextForShiftTx(tx, row.staffUserId, proposedShift);
+        const { hard } = evaluateAssignmentConstraints(ctx, {});
+        if (hard.length > 0) {
+          const primary = hard[0]!;
+          return {
+            staffName: row.staff.name || "Assigned staff",
+            reason: primary.message,
+          };
+        }
+      }
+      return null;
+    });
+    if (firstViolation) {
+      throw new Error(`ASSIGNED_STAFF_CONSTRAINTS:${firstViolation.staffName}:${firstViolation.reason}`);
+    }
   }
 
   const updated = await prisma.$transaction(async (tx) => {

@@ -188,6 +188,15 @@ shiftsRouter.patch(
         res.status(400).json({ error: "endAtUtc must be after startAtUtc" });
         return;
       }
+      if (msg.startsWith("ASSIGNED_STAFF_CONSTRAINTS:")) {
+        const parts = msg.split(":");
+        const staffName = parts[1] ?? "assigned staff member";
+        const reason = parts.slice(2).join(":") || "assignment constraints would be violated";
+        res.status(400).json({
+          error: `Cannot update shift because ${staffName} would violate assignment constraints: ${reason}`,
+        });
+        return;
+      }
       throw e;
     }
   },

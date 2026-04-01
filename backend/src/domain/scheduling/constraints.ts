@@ -248,22 +248,34 @@ export function evaluateAssignmentConstraints(
 
   const allShifts: ShiftIntervalInput[] = [...ctx.otherAssignments, shift];
   const dailyMinutes = computeDailyMinutesInTz(allShifts, shift.locationTzIana);
-  for (const [, minutes] of dailyMinutes) {
+  let hasDailyHard = false;
+  let maxDailyWarnMinutes = 0;
+  let maxDailyWarnKey = "";
+  for (const [dayKey, minutes] of dailyMinutes) {
     if (minutes > 12 * 60) {
       hard.push({
         code: "DAILY_HARD_12H",
         message: "With this assignment, daily hours at the location would exceed 12 hours (hard limit).",
         severity: "hard",
       });
+      hasDailyHard = true;
       break;
     }
     if (minutes > 8 * 60) {
-      warnings.push({
-        code: "DAILY_WARN_8H",
-        message: "With this assignment, daily hours would exceed 8 hours on that day (warning).",
-        severity: "warn",
-      });
+      if (minutes > maxDailyWarnMinutes) {
+        maxDailyWarnMinutes = minutes;
+        maxDailyWarnKey = dayKey;
+      }
     }
+  }
+  if (!hasDailyHard && maxDailyWarnMinutes > 8 * 60) {
+    const dailyWarnHours = (Math.round((maxDailyWarnMinutes / 60) * 10) / 10).toFixed(1);
+    const dayLabel = DateTime.fromISO(maxDailyWarnKey, { zone: shift.locationTzIana }).toFormat("EEE, MMM d");
+    warnings.push({
+      code: "DAILY_WARN_8H",
+      message: `With this assignment, daily hours would reach ${dailyWarnHours}h on ${dayLabel} (warning over 8h).`,
+      severity: "warn",
+    });
   }
 
   const weeklyMinutes = computeWeeklyMinutesInLocationWeek(
@@ -271,17 +283,19 @@ export function evaluateAssignmentConstraints(
     shift.locationTzIana,
     shift.startAtUtc,
   );
+  const weeklyHours = Math.round((weeklyMinutes / 60) * 10) / 10;
+  const weeklyHoursLabel = `${weeklyHours.toFixed(1)}h`;
   if (weeklyMinutes >= 35 * 60 && weeklyMinutes < 40 * 60) {
     warnings.push({
       code: "WEEKLY_WARN_35",
-      message: "Weekly hours in this ISO week would reach 35+ before 40 (approaching overtime threshold).",
+      message: `Weekly hours in this ISO week would reach ${weeklyHoursLabel} (approaching the 40h overtime threshold).`,
       severity: "warn",
     });
   }
   if (weeklyMinutes >= 40 * 60) {
     warnings.push({
       code: "WEEKLY_WARN_40",
-      message: "Weekly hours in this ISO week would be at or above 40 (overtime risk).",
+      message: `Weekly hours in this ISO week would reach ${weeklyHoursLabel} (overtime risk, 40h+).`,
       severity: "warn",
     });
   }
