@@ -32,14 +32,20 @@ export function useSocketSync(): void {
 
     const invShifts = (): void => {
       void queryClient.invalidateQueries({ queryKey: ["shifts"] });
+      // Ensure any mounted staff/manager schedule views update immediately.
+      void queryClient.refetchQueries({ queryKey: ["shifts"], type: "active" });
     };
     const invShiftsAndWeekState = (): void => {
       invShifts();
       void queryClient.invalidateQueries({ queryKey: ["weekScheduleState"] });
+      void queryClient.refetchQueries({ queryKey: ["weekScheduleState"], type: "active" });
     };
     const invCoverage = (): void => {
       invShiftsAndWeekState();
       void queryClient.invalidateQueries({ queryKey: ["swapCandidates"] });
+      void queryClient.refetchQueries({ queryKey: ["swapCandidates"], type: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["managerCoverageQueue"] });
+      void queryClient.refetchQueries({ queryKey: ["managerCoverageQueue"], type: "active" });
     };
     socket.on("schedule.weekUpdated", invShiftsAndWeekState);
     socket.on("shift.updated", invShiftsAndWeekState);
@@ -48,6 +54,7 @@ export function useSocketSync(): void {
     socket.on("coverage.requestUpdated", invCoverage);
     socket.on("notification.created", () => {
       void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.refetchQueries({ queryKey: ["notifications"], type: "active" });
     });
     socket.on("presence.onDutyUpdated", () => {
       void queryClient.invalidateQueries({ queryKey: ["onDuty"] });

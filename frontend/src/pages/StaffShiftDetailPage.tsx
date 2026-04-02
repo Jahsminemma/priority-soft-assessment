@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createCoverageRequest,
@@ -21,6 +21,7 @@ export default function StaffShiftDetailPage(): React.ReactElement {
   const { token, user } = useAuth();
   const isStaff = user?.role === "STAFF";
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [offerOpen, setOfferOpen] = useState(false);
   const [swapOpen, setSwapOpen] = useState(false);
   const [offerSuccessOpen, setOfferSuccessOpen] = useState(false);
@@ -82,9 +83,18 @@ export default function StaffShiftDetailPage(): React.ReactElement {
 
   return (
     <div className="page page--staff-shift-detail">
-      <Link to="/" className="staff-shift-detail__back">
-        ← Home
-      </Link>
+      <button
+        type="button"
+        className="staff-shift-detail__back"
+        onClick={() => {
+          // Prefer true "back" to preserve the user’s previous context (My schedule, Dashboard, Notifications, etc).
+          // Fall back to the staff schedule page when there is no browser history entry.
+          if (window.history.length > 1) navigate(-1);
+          else navigate("/my-week");
+        }}
+      >
+        ← Back
+      </button>
 
       {shiftQuery.isLoading ? <p className="muted">Loading shift…</p> : null}
       {shiftQuery.isError ? (

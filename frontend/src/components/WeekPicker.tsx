@@ -114,20 +114,22 @@ export function WeekPicker({ weekKey, onWeekKeyChange, id, minWeekKey, compact =
   if (compact) {
     return (
       <div className="week-picker week-picker--compact" role="group" aria-label="Schedule week">
-        {navButtons}
-        <div className="week-picker__compact-range">
-          {rangeLabel ? (
-            <>
-              <span className="week-picker__dates" aria-live="polite">
-                {rangeLabel}
-              </span>
-              <span className="week-picker__code mono">{weekKey}</span>
-            </>
-          ) : (
-            <span className="muted">{weekKey}</span>
-          )}
+        <div className="week-picker__compact-row week-picker__compact-row--nav">{navButtons}</div>
+        <div className="week-picker__compact-row week-picker__compact-row--range">
+          <div className="week-picker__compact-range">
+            {rangeLabel ? (
+              <>
+                <span className="week-picker__dates" aria-live="polite">
+                  {rangeLabel}
+                </span>
+                <span className="week-picker__code mono">{weekKey}</span>
+              </>
+            ) : (
+              <span className="muted">{weekKey}</span>
+            )}
+          </div>
+          {dateJump}
         </div>
-        {dateJump}
       </div>
     );
   }

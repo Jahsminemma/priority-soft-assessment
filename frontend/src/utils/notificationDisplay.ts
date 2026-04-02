@@ -38,13 +38,27 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
   const p = asRecord(payload);
   const requestId = str(p.requestId);
 
+  const shiftLine = (v: unknown): string | null => {
+    const r = asRecord(v);
+    const loc = str(r.locationName);
+    const skill = str(r.skillName);
+    const date = str(r.localDateLabel);
+    const time = str(r.localTimeLabel);
+    if (!loc || !date || !time) return null;
+    const tail = `${loc}${skill ? ` · ${skill}` : ""} · ${date} · ${time}`;
+    return tail;
+  };
+
   switch (type) {
     case "coverage.swap_requested": {
       const twoWay = bool(p.twoWay);
+      const requesterName = str(p.requesterName) ?? "Coworker";
+      const take = shiftLine(p.theirShift);
+      const give = shiftLine(p.myShift);
       return withOptionalRequestId(
         twoWay ? "Shift trade request" : "Shift handoff request",
         twoWay
-          ? "A coworker wants to trade shifts with you: you’d take theirs and they’d take yours. Tap Accept if you agree— a manager still has to approve."
+          ? `${requesterName} wants to trade shifts.\n\nYou’d take: ${take ?? "their shift"}\nYou’d give: ${give ?? "your shift"}\n\nTap Accept to agree (a manager still has to approve), or Reject to decline.`
           : "A coworker asked you to take their shift (no trade). If you can work it, tap Accept— a manager still has to approve.",
         requestId,
       );
@@ -71,6 +85,12 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
       return withOptionalRequestId(
         "Coverage request accepted",
         "The other person accepted. If you’re the original requester and changed your mind, you can Withdraw before a manager approves.",
+        requestId,
+      );
+    case "coverage.declined":
+      return withOptionalRequestId(
+        "Swap request declined",
+        "The teammate declined your swap request. You can pick another person to trade with, or offer your shift for pickup.",
         requestId,
       );
     case "coverage.ready_for_approval":
@@ -117,9 +137,28 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
       };
     case "schedule.unpublished": {
       const msg = str(p.message);
+      const locationName = str(p.locationName);
+      const weekKey = str(p.weekKey);
+      const where = locationName ? ` for ${locationName}` : "";
+      const when = weekKey ? ` (${weekKey})` : "";
       return {
         title: "Schedule unpublished",
-        body: msg ?? "Your site’s schedule week was unpublished. Check with your manager for updates.",
+        body:
+          msg ??
+          `A schedule week${where} was unpublished${when}. Shifts may change — check with your manager for updates.`,
+      };
+    }
+    case "schedule.published": {
+      const locationName = str(p.locationName);
+      const weekKey = str(p.weekKey);
+      const kind = str(p.kind);
+      const isUpdate = kind === "updated";
+      const title = isUpdate ? "Schedule updated" : "Schedule published";
+      const where = locationName ? ` for ${locationName}` : "";
+      const when = weekKey ? ` (${weekKey})` : "";
+      return {
+        title,
+        body: `A new schedule week${where} was ${isUpdate ? "updated" : "published"}${when}. Open My schedule to see your shifts.`,
       };
     }
     case "staff.availability_changed":

@@ -23,9 +23,17 @@ export async function publishWeek(
   if (!location) throw new Error("LOCATION_NOT_FOUND");
   const weekStartDateLocal = weekStartDateLocalFromWeekKey(weekKeyNorm, location.tzIana);
   const cutoff = cutoffHours ?? 48;
+  const weekStartAtLocal = DateTime.fromISO(`${weekStartDateLocal}T00:00:00`, { zone: location.tzIana });
+  const weekEndExclusiveLocal = weekStartAtLocal.plus({ days: 7 });
+  const weekStartUtc = weekStartAtLocal.toUTC().toJSDate();
+  const weekEndUtc = weekEndExclusiveLocal.toUTC().toJSDate();
+  const locationName = location.name;
+  let publishKind: "published" | "updated" = "published";
 
   await prisma.$transaction(async (tx) => {
-    const existing = await tx.scheduleWeek.findUnique({
+    // NOTE: Prisma client types can lag behind migrations in some editor environments.
+    // At runtime these fields exist (see migration), so we cast to keep TS diagnostics stable.
+    const existing: any = await tx.scheduleWeek.findUnique({
       where: { locationId_weekStartDateLocal: { locationId, weekStartDateLocal } },
     });
     if (
@@ -34,12 +42,17 @@ export async function publishWeek(
     ) {
       throw new Error("PUBLISH_NOTHING_NEW");
     }
+    // Publish based on actual local-week window, not `weekKey` (which can drift if older data was created incorrectly).
     await tx.shift.updateMany({
-      where: { locationId, weekKey: { in: isoWeekKeyDbVariants(weekKeyNorm) } },
+      where: {
+        locationId,
+        startAtUtc: { gte: weekStartUtc, lt: weekEndUtc },
+      },
       data: { status: "PUBLISHED" },
     });
     if (existing) {
-      await tx.scheduleWeek.update({
+      if (existing.status === "PUBLISHED") publishKind = "updated";
+      await (tx.scheduleWeek as any).update({
         where: { id: existing.id },
         data: {
           status: "PUBLISHED",
@@ -54,8 +67,6 @@ export async function publishWeek(
           weekStartDateLocal,
           status: "PUBLISHED",
           cutoffHours: cutoff,
-          scheduleContentRevision: 0,
-          publishedContentRevision: 0,
         },
       });
     }
@@ -69,6 +80,30 @@ export async function publishWeek(
       },
     });
   });
+
+  // Notify assigned staff that a schedule week was published/updated.
+  const assignments = await prisma.shiftAssignment.findMany({
+    where: {
+      status: "ASSIGNED",
+      shift: {
+        locationId,
+        status: "PUBLISHED",
+        startAtUtc: { gte: weekStartUtc, lt: weekEndUtc },
+      },
+    },
+    select: { staffUserId: true },
+  });
+  const notified = new Set<string>();
+  for (const a of assignments) {
+    if (notified.has(a.staffUserId)) continue;
+    notified.add(a.staffUserId);
+    await createNotification(a.staffUserId, "schedule.published", {
+      locationId,
+      locationName,
+      weekKey: weekKeyNorm,
+      kind: publishKind,
+    });
+  }
 
   emitScheduleWeekUpdated(locationId, { weekKey: weekKeyNorm, status: "PUBLISHED" });
   return { weekKey: weekKeyNorm, status: "PUBLISHED" };
@@ -120,7 +155,7 @@ export async function getWeekScheduleState(
   if (!location) throw new Error("LOCATION_NOT_FOUND");
   const weekStartDateLocal = weekStartDateLocalFromWeekKey(weekKeyNorm, location.tzIana);
 
-  const sw = await prisma.scheduleWeek.findUnique({
+  const sw: any = await prisma.scheduleWeek.findUnique({
     where: { locationId_weekStartDateLocal: { locationId, weekStartDateLocal } },
   });
   const cutoffHours = sw?.cutoffHours ?? 48;
@@ -172,6 +207,11 @@ export async function unpublishWeek(
   const location = await prisma.location.findUnique({ where: { id: locationId } });
   if (!location) throw new Error("LOCATION_NOT_FOUND");
   const weekStartDateLocal = weekStartDateLocalFromWeekKey(weekKeyNorm, location.tzIana);
+  const locationName = location.name;
+  const weekStartAtLocal = DateTime.fromISO(`${weekStartDateLocal}T00:00:00`, { zone: location.tzIana });
+  const weekEndExclusiveLocal = weekStartAtLocal.plus({ days: 7 });
+  const weekStartUtc = weekStartAtLocal.toUTC().toJSDate();
+  const weekEndUtc = weekEndExclusiveLocal.toUTC().toJSDate();
 
   const sw = await prisma.scheduleWeek.findUnique({
     where: { locationId_weekStartDateLocal: { locationId, weekStartDateLocal } },
@@ -198,7 +238,7 @@ export async function unpublishWeek(
   }
 
   const shiftRows = await prisma.shift.findMany({
-    where: { locationId, weekKey: { in: isoWeekKeyDbVariants(weekKeyNorm) } },
+    where: { locationId, startAtUtc: { gte: weekStartUtc, lt: weekEndUtc } },
     select: { id: true },
   });
 
@@ -216,7 +256,7 @@ export async function unpublishWeek(
       data: { status: "DRAFT" },
     });
     await tx.shift.updateMany({
-      where: { locationId, weekKey: { in: isoWeekKeyDbVariants(weekKeyNorm) } },
+        where: { locationId, startAtUtc: { gte: weekStartUtc, lt: weekEndUtc } },
       data: { status: "DRAFT" },
     });
     await tx.auditLog.create({
@@ -236,7 +276,7 @@ export async function unpublishWeek(
 
   const assignments = await prisma.shiftAssignment.findMany({
     where: {
-      shift: { locationId, weekKey: { in: isoWeekKeyDbVariants(weekKeyNorm) } },
+      shift: { locationId, startAtUtc: { gte: weekStartUtc, lt: weekEndUtc } },
       status: "ASSIGNED",
     },
     select: { staffUserId: true },
@@ -247,6 +287,7 @@ export async function unpublishWeek(
     notified.add(a.staffUserId);
     await createNotification(a.staffUserId, "schedule.unpublished", {
       locationId,
+      locationName,
       weekKey: weekKeyNorm,
       message: "Schedule has been unpublished; check for updates.",
     });

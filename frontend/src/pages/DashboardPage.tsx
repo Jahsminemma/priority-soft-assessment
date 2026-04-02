@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { normalizeIsoWeekKey } from "@shiftsync/shared";
+import { ManagerHomeDashboard } from "../components/ManagerHomeDashboard.js";
 import { StaffHomeDashboard } from "../components/StaffHomeDashboard.js";
 import { useAuth } from "../context/AuthContext.js";
 import { formatWeekRangeLabel, initialWeekKeyFromToday } from "../utils/weekKey.js";
@@ -17,6 +18,10 @@ export default function DashboardPage(): React.ReactElement {
     );
   }
 
+  if (canManage && token) {
+    return <ManagerHomeDashboard token={token} userName={user?.name} role={user?.role} />;
+  }
+
   return (
     <div className="page">
       <h1 className="page__title">Home</h1>
@@ -27,26 +32,6 @@ export default function DashboardPage(): React.ReactElement {
       </p>
 
       <div className="grid-2">
-        {canManage ? (
-          <div className="card">
-            <h2 className="card__title">For managers</h2>
-            <ul className="link-list">
-              <li>
-                <Link to="/schedule">Create shifts, publish them, and assign staff (check rules before confirming)</Link>
-              </li>
-              <li>
-                <Link to="/assignments">See who is on each shift for a week (read-only overview)</Link>
-              </li>
-              <li>
-                <Link to="/analytics">Review fairness and overtime for a week</Link>
-              </li>
-              <li>
-                <Link to="/clock">See who is clocked in right now</Link>
-              </li>
-            </ul>
-          </div>
-        ) : null}
-
         <div className="card">
           <h2 className="card__title">Account</h2>
           <ul className="link-list">

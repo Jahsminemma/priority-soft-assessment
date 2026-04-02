@@ -5,6 +5,7 @@ import {
   AvailabilityExceptionBatchInputSchema,
   AvailabilityExceptionInputSchema,
   CreateCoverageRequestSchema,
+  ManagerCoverageQueueSchema,
   CreateInviteRequestSchema,
   CreateInviteResponseSchema,
   StaffLocationsPatchRequestSchema,
@@ -31,6 +32,7 @@ import {
   type LocationSummary,
   type NotificationDto,
   type CreateCoverageRequest,
+  type ManagerCoverageQueueItem,
   type NotificationPrefs,
   normalizeIsoWeekKey,
   WeekScheduleStateResponseSchema,
@@ -231,6 +233,7 @@ const SwapCandidateRowSchema = z.object({
 const SwapCandidatesResponseSchema = z.object({
   candidates: z.array(SwapCandidateRowSchema),
   hasPendingSwapRequest: z.boolean(),
+  pendingSwapRequestId: z.string().uuid().nullable(),
   locationTzIana: z.string(),
 });
 
@@ -508,6 +511,29 @@ export async function cancelCoverageRequest(token: string, requestId: string): P
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Cancel failed");
+}
+
+export async function declineCoverageRequest(token: string, requestId: string): Promise<void> {
+  const res = await fetch(`${base}/api/coverage/${requestId}/decline`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err: unknown = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof err === "object" && err !== null && "error" in err
+        ? String((err as { error: unknown }).error)
+        : "Decline failed",
+    );
+  }
+}
+
+export async function fetchManagerCoverageQueue(token: string): Promise<ManagerCoverageQueueItem[]> {
+  const res = await fetch(`${base}/api/coverage/manager-queue`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Could not load coverage queue.");
+  return ManagerCoverageQueueSchema.parse(await res.json());
 }
 
 export async function clockIn(token: string, shiftId: string): Promise<{ sessionId: string }> {

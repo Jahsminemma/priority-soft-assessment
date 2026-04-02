@@ -352,6 +352,9 @@ export default function SchedulePage(): React.ReactElement {
     onSuccess: () => {
       invalidateShifts();
       invalidateScheduleWeek();
+      // Make the UI flip from PUBLISHED -> DRAFT immediately without requiring a full page reload.
+      void shiftsQuery.refetch();
+      void weekStateQuery.refetch();
       setUnpublishModalOpen(false);
       setUnpublishEmergencyReason("");
     },

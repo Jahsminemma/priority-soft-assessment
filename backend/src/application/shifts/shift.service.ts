@@ -42,28 +42,44 @@ export async function listShiftsByLocationWeek(
 /** Published shifts this staff member is assigned to (and only for published weeks). */
 export async function listPublishedShiftsForStaff(actor: AuthedUser, weekKey: string): Promise<ShiftDto[]> {
   if (actor.role !== "STAFF") return [];
-  const keys = isoWeekKeyDbVariants(weekKey);
+  const weekKeyNorm = normalizeIsoWeekKey(weekKey);
+  const locations = await prisma.location.findMany({ select: { id: true, tzIana: true } });
+  if (locations.length === 0) return [];
+
+  // Build an OR window per location to avoid relying on `shift.weekKey` (which can drift).
+  const windows = locations.map((loc) => {
+    const weekStartDateLocal = weekStartDateLocalFromWeekKey(weekKeyNorm, loc.tzIana);
+    const weekStartAtLocal = DateTime.fromISO(`${weekStartDateLocal}T00:00:00`, { zone: loc.tzIana });
+    const weekEndExclusiveLocal = weekStartAtLocal.plus({ days: 7 });
+    return {
+      locationId: loc.id,
+      tzIana: loc.tzIana,
+      weekStartDateLocal,
+      startAtUtc: weekStartAtLocal.toUTC().toJSDate(),
+      endAtUtc: weekEndExclusiveLocal.toUTC().toJSDate(),
+    };
+  });
+
   const assignments = await prisma.shiftAssignment.findMany({
     where: {
       staffUserId: actor.id,
       status: "ASSIGNED",
-      shift: {
-        weekKey: { in: keys },
-        status: "PUBLISHED",
-      },
+      OR: windows.map((w) => ({
+        shift: {
+          locationId: w.locationId,
+          status: "PUBLISHED",
+          startAtUtc: { gte: w.startAtUtc, lt: w.endAtUtc },
+        },
+      })),
     },
-    include: {
-      shift: {
-        include: { location: true },
-      },
-    },
+    include: { shift: { include: { location: true } } },
   });
   if (assignments.length === 0) return [];
 
   const byLocation = new Map<string, string>();
   for (const a of assignments) {
     if (byLocation.has(a.shift.locationId)) continue;
-    byLocation.set(a.shift.locationId, weekStartDateLocalFromWeekKey(weekKey, a.shift.location.tzIana));
+    byLocation.set(a.shift.locationId, weekStartDateLocalFromWeekKey(weekKeyNorm, a.shift.location.tzIana));
   }
   const publishedWeekTuples = [...byLocation.entries()].map(([locationId, weekStartDateLocal]) => ({
     locationId,

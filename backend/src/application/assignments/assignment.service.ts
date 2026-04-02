@@ -450,6 +450,7 @@ export async function listSwapCandidatesForAssignedStaff(
       ok: true;
       candidates: SwapPairCandidate[];
       hasPendingSwapRequest: boolean;
+      pendingSwapRequestId: string | null;
       locationTzIana: string;
     }
   | { ok: false; reason: "NOT_FOUND" | "NOT_ASSIGNED" }
@@ -488,6 +489,22 @@ export async function listSwapCandidatesForAssignedStaff(
 
   const weekKeys = isoWeekKeyDbVariants(normalizeIsoWeekKey(shift.weekKey));
 
+  // Avoid presenting swap candidates whose "their shift" is already held by the requester.
+  // This can happen when two staff share a shift or when the requester already picked up
+  // that shift previously; in either case it is not a meaningful swap target.
+  const requesterAssignedShiftIds = new Set(
+    (
+      await prisma.shiftAssignment.findMany({
+        where: {
+          staffUserId: actor.id,
+          status: "ASSIGNED",
+          shift: { weekKey: { in: weekKeys } },
+        },
+        select: { shiftId: true },
+      })
+    ).map((r) => r.shiftId),
+  );
+
   const peerAssignments = await prisma.shiftAssignment.findMany({
     where: {
       staffUserId: { not: actor.id },
@@ -510,6 +527,7 @@ export async function listSwapCandidatesForAssignedStaff(
     if (alreadyOnShift.has(peerId)) continue;
 
     const theirShift = row.shift;
+    if (requesterAssignedShiftIds.has(theirShift.id)) continue;
     const ctxTheyTakeMine = await buildConstraintContext(shiftId, peerId);
     if (evaluateAssignmentConstraints(ctxTheyTakeMine, {}).hard.length > 0) continue;
 
@@ -538,6 +556,7 @@ export async function listSwapCandidatesForAssignedStaff(
     ok: true,
     candidates: out.slice(0, SWAP_PAIR_LIMIT),
     hasPendingSwapRequest,
+    pendingSwapRequestId: pendingSwap?.id ?? null,
     locationTzIana: shift.location.tzIana,
   };
 }

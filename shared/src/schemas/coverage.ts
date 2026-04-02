@@ -20,3 +20,31 @@ export const CreateCoverageRequestSchema = z.union([
 ]);
 
 export type CreateCoverageRequest = z.infer<typeof CreateCoverageRequestSchema>;
+
+const CoverageShiftSummarySchema = z.object({
+  shiftId: z.string().uuid(),
+  locationId: z.string().uuid(),
+  locationName: z.string(),
+  skillName: z.string(),
+  localDateLabel: z.string(),
+  localTimeLabel: z.string(),
+});
+
+export const ManagerCoverageQueueItemSchema = z.object({
+  id: z.string().uuid(),
+  type: z.enum(["SWAP", "DROP"]),
+  status: z.enum(["PENDING", "ACCEPTED"]),
+  requesterId: z.string().uuid(),
+  requesterName: z.string(),
+  targetId: z.string().uuid().nullable(),
+  targetName: z.string().nullable(),
+  twoWay: z.boolean(),
+  primaryShift: CoverageShiftSummarySchema,
+  secondShift: CoverageShiftSummarySchema.nullable(),
+  canApprove: z.boolean(),
+  /** Present for DROP while still open for pickup. */
+  expiresAt: z.string().nullable(),
+});
+
+export const ManagerCoverageQueueSchema = z.array(ManagerCoverageQueueItemSchema);
+export type ManagerCoverageQueueItem = z.infer<typeof ManagerCoverageQueueItemSchema>;

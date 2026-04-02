@@ -247,10 +247,15 @@ export function evaluateAssignmentConstraints(
   }
 
   const allShifts: ShiftIntervalInput[] = [...ctx.otherAssignments, shift];
-  const dailyMinutes = computeDailyMinutesInTz(allShifts, shift.locationTzIana);
+  // Daily hour warnings are intended to reflect a "day at the location".
+  // So we only count shifts that share the same location timezone as the shift being scheduled.
+  const dailyMinutes = computeDailyMinutesInTz(
+    allShifts.filter((s) => s.locationTzIana === shift.locationTzIana),
+    shift.locationTzIana,
+  );
+
   // "Long day" warnings should correspond to the week currently being scheduled.
-  // Without this, shifts in adjacent weeks (or overnight shifts spilling into the prior/next day)
-  // can produce warnings on days outside the user’s current schedule week view.
+  // Otherwise they can produce warnings on days outside the user’s current schedule week view.
   const anchor = DateTime.fromJSDate(shift.startAtUtc, { zone: "utc" }).setZone(shift.locationTzIana);
   const weekStart = anchor.startOf("week");
   const allowedDayKeys = new Set<string>();
@@ -283,7 +288,7 @@ export function evaluateAssignmentConstraints(
     const dayLabel = DateTime.fromISO(maxDailyWarnKey, { zone: shift.locationTzIana }).toFormat("EEE, MMM d");
     warnings.push({
       code: "DAILY_WARN_8H",
-      message: `With this assignment, daily hours would reach ${dailyWarnHours}h on ${dayLabel} (warning over 8h).`,
+      message: `With this assignment, daily hours at the location would reach ${dailyWarnHours}h on ${dayLabel} (warning over 8h).`,
       severity: "warn",
     });
   }

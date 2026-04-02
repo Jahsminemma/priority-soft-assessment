@@ -6,7 +6,11 @@ import { FeedbackModal } from "../components/FeedbackModal.js";
 import { StaffRequestSwapDialog } from "../components/StaffRequestSwapDialog.js";
 import { useAuth } from "../context/AuthContext.js";
 import { WeekPicker } from "../components/WeekPicker.js";
-import { formatShiftRangeLabel } from "../utils/scheduleTime.js";
+import {
+  formatShiftDateStack,
+  formatShiftDurationHuman,
+  formatShiftWallTimeArrow,
+} from "../utils/scheduleTime.js";
 import { initialWeekKeyFromToday } from "../utils/weekKey.js";
 import { normalizeIsoWeekKey } from "@shiftsync/shared";
 import { groupStaffShiftsByDay } from "../utils/staffSchedule.js";
@@ -113,25 +117,39 @@ export default function StaffSchedulePage(): React.ReactElement {
                 const loc = locById.get(s.locationId);
                 const skill = skillById.get(s.requiredSkillId);
                 if (!loc) return null;
+                const stack = formatShiftDateStack(s.startAtUtc, loc.tzIana);
                 return (
                   <li key={s.id}>
-                    <article className="staff-shift-card">
-                      <Link to={`/my-shifts/${s.id}`} className="staff-shift-card__main staff-shift-card__main--link">
-                        <p className="staff-shift-card__location">{loc.name}</p>
-                        <p className="staff-shift-card__time">{formatShiftRangeLabel(s.startAtUtc, s.endAtUtc, loc.tzIana)}</p>
-                        {skill ? <p className="staff-shift-card__skill">{skill}</p> : null}
-                        <p className="staff-shift-card__status">
-                          <span className={`staff-shift-card__badge staff-shift-card__badge--${s.status.toLowerCase()}`}>
-                            {s.status === "PUBLISHED" ? "Published" : s.status}
-                          </span>
-                          {s.isPremium ? <span className="staff-shift-card__badge staff-shift-card__badge--premium">Premium</span> : null}
-                        </p>
-                        <span className="staff-shift-card__detail-hint">View details →</span>
+                    <article className="staff-schedule__shift-item">
+                      <Link to={`/my-shifts/${s.id}`} className="staff-dash__shift-row staff-schedule__shift-row">
+                        <div className="staff-dash__shift-stack" aria-hidden>
+                          <span>{stack.line1}</span>
+                          <span className="staff-dash__shift-stack-day">{stack.line2}</span>
+                          <span>{stack.line3}</span>
+                        </div>
+                        <div className="staff-dash__shift-body">
+                          <p className="staff-dash__shift-time">
+                            {formatShiftWallTimeArrow(s.startAtUtc, s.endAtUtc, loc.tzIana)}
+                          </p>
+                          <p className="staff-dash__shift-sub">
+                            <span className="staff-dash__dot staff-dash__dot--sm" aria-hidden />
+                            {loc.name}
+                            {skill ? ` · ${skill}` : ""}
+                          </p>
+                          <p className="staff-dash__shift-dur">
+                            {formatShiftDurationHuman(s.startAtUtc, s.endAtUtc)}
+                            {s.isPremium ? " · Premium" : ""}
+                          </p>
+                        </div>
+                        <span className="staff-schedule__shift-cta" aria-hidden>
+                          View
+                        </span>
                       </Link>
-                      <div className="staff-shift-card__actions">
+
+                      <div className="staff-schedule__shift-actions">
                         <button
                           type="button"
-                          className="btn btn--secondary btn--sm staff-shift-card__btn"
+                          className="btn btn--secondary btn--sm staff-schedule__shift-btn"
                           disabled={calloutMut.isPending}
                           onClick={() => void calloutMut.mutateAsync(s.id)}
                         >
@@ -139,7 +157,7 @@ export default function StaffSchedulePage(): React.ReactElement {
                         </button>
                         <button
                           type="button"
-                          className="btn btn--secondary btn--sm staff-shift-card__btn"
+                          className="btn btn--secondary btn--sm staff-schedule__shift-btn"
                           onClick={() => setSwapShiftId(s.id)}
                         >
                           Request swap

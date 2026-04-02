@@ -143,6 +143,35 @@ describe("evaluateAssignmentConstraints", () => {
     expect(dailyWarns[0]?.message).toContain("9.5h");
   });
 
+  it("does not attribute other-location work to the same local day", () => {
+    // LA Thu 9-5 (8h) plus NY Fri 9-11 (2h) should NOT create a Thu warning
+    // when scheduling the LA shift. (Fri NY work remains on Fri when interpreted
+    // as a day-at-that-location.)
+    const { warnings } = evaluateAssignmentConstraints(
+      {
+        ...baseCtx,
+        shift: {
+          ...baseCtx.shift,
+          // Thu Apr 9 2026 09:00-17:00 America/Los_Angeles
+          startAtUtc: new Date("2026-04-09T16:00:00Z"),
+          endAtUtc: new Date("2026-04-10T00:00:00Z"),
+          locationTzIana: "America/Los_Angeles",
+        },
+        otherAssignments: [
+          {
+            shiftId: "s-ny-fri-morning",
+            // Fri Apr 10 2026 09:00-11:00 America/New_York
+            startAtUtc: new Date("2026-04-10T13:00:00Z"),
+            endAtUtc: new Date("2026-04-10T15:00:00Z"),
+            locationTzIana: "America/New_York",
+          },
+        ],
+      },
+      {},
+    );
+    expect(warnings.some((w) => w.code === "DAILY_WARN_8H")).toBe(false);
+  });
+
   it("shows projected weekly hours in overtime warning", () => {
     const { warnings } = evaluateAssignmentConstraints(
       {

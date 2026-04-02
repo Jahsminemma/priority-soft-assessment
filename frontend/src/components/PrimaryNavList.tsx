@@ -105,14 +105,7 @@ export function PrimaryNavList({
             </span>
           ) : null}
         </span>
-        <span className="nav-rail__label">
-          Notifications
-          {unreadNotificationsCount > 0 ? (
-            <span className="nav-rail__label-badge" aria-hidden title="Unread notifications">
-              {badgeCount}
-            </span>
-          ) : null}
-        </span>
+        <span className="nav-rail__label">Notifications</span>
       </NavLink>
       <NavLink to="/settings" onClick={onNavigate} className={linkClass}>
         <span className={iw}>

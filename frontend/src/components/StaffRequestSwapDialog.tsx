@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createCoverageRequest, fetchSwapCandidates } from "../api.js";
+import { cancelCoverageRequest, createCoverageRequest, fetchSwapCandidates } from "../api.js";
 import { FeedbackModal } from "./FeedbackModal.js";
 import { formatShiftRangeLabel } from "../utils/scheduleTime.js";
 
@@ -79,6 +79,18 @@ export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props)
     },
   });
 
+  const withdrawMut = useMutation({
+    mutationFn: async () => {
+      const id = swapPayload?.pendingSwapRequestId;
+      if (!id) throw new Error("Could not find the pending request to withdraw.");
+      await cancelCoverageRequest(token, id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.invalidateQueries({ queryKey: ["swapCandidates"] });
+    },
+  });
+
   const handleSuccessClose = (): void => {
     setSuccessOpen(false);
     onClose();
@@ -128,10 +140,26 @@ export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props)
                 </p>
               ) : null}
               {candidatesQuery.isSuccess && swapBlocked ? (
-                <p className="staff-swap-modal__blocked muted" role="status">
-                  You already have a <strong>swap request in progress</strong> for this shift (waiting on your teammate or a
-                  manager). Withdraw it from <strong>Notifications</strong> if you need to start over.
-                </p>
+                <div className="staff-swap-modal__blocked muted" role="status">
+                  <p>
+                    You already have a <strong>swap request in progress</strong> for this shift (waiting on your teammate or a
+                    manager).
+                  </p>
+                  <div className="btn-row">
+                    <button
+                      type="button"
+                      className="btn btn--danger"
+                      disabled={!swapPayload?.pendingSwapRequestId || withdrawMut.isPending}
+                      onClick={() => void withdrawMut.mutateAsync()}
+                      title={!swapPayload?.pendingSwapRequestId ? "No pending request id found" : undefined}
+                    >
+                      {withdrawMut.isPending ? "Withdrawing…" : "Withdraw request"}
+                    </button>
+                  </div>
+                  {withdrawMut.isError ? (
+                    <p className="text-error">{withdrawMut.error instanceof Error ? withdrawMut.error.message : "Withdraw failed"}</p>
+                  ) : null}
+                </div>
               ) : null}
               {candidatesQuery.isSuccess && !swapBlocked && rows.length === 0 ? (
                 <p className="muted">
