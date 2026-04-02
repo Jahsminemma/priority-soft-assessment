@@ -63,6 +63,15 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
         requestId,
       );
     }
+    case "coverage.callout_open": {
+      const requesterName = str(p.requesterName) ?? "A coworker";
+      const take = shiftLine(p.theirShift);
+      return withOptionalRequestId(
+        "Open shift — claim now",
+        `${requesterName} needs coverage. First eligible person to claim gets it (schedule rules apply).\n\n${take ?? "Shift"}\n\nIf someone else claims first, this alert will show as filled.`,
+        requestId,
+      );
+    }
     case "coverage.manager_pending": {
       const kind = str(p.type);
       const twoWay = bool(p.twoWay);
@@ -97,6 +106,36 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
       return withOptionalRequestId(
         "Ready for your approval",
         "The teammate has accepted. Review and tap Approve to finalize the schedule change.",
+        requestId,
+      );
+    case "coverage.shift_assigned": {
+      const swap = bool(p.swap);
+      const fromDrop = bool(p.fromDrop);
+      const line = shiftLine(p);
+      if (swap) {
+        return withOptionalRequestId(
+          "You were assigned a shift (swap)",
+          `A manager approved the swap. You’re now scheduled for:\n\n${line ?? "Open My schedule for details."}\n\nCheck My schedule for the full week.`,
+          requestId,
+        );
+      }
+      if (fromDrop) {
+        return withOptionalRequestId(
+          "You were assigned a dropped shift",
+          `A teammate offered this shift for pickup and you’re now on the schedule for it:\n\n${line ?? "Open My schedule for details."}\n\nOpen My schedule to confirm date and time.`,
+          requestId,
+        );
+      }
+      return withOptionalRequestId(
+        "You were assigned a shift",
+        `You’re now on the schedule for this shift:\n\n${line ?? "Open My schedule for details."}\n\nOpen My schedule to confirm date and time.`,
+        requestId,
+      );
+    }
+    case "coverage.drop_resolved":
+      return withOptionalRequestId(
+        "Your shift offer is complete",
+        "You’re no longer assigned to that slot. Another teammate is now on the schedule for that shift (or the offer was resolved). Open My schedule if you want to double-check.",
         requestId,
       );
     case "coverage.approved": {

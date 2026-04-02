@@ -44,7 +44,19 @@ export async function exportAuditLogs(
   actor: AuthedUser,
   from: Date,
   to: Date,
-): Promise<Array<{ id: string; actorUserId: string; entityType: string; entityId: string; action: string; createdAt: Date }> | null> {
+): Promise<
+  | Array<{
+      id: string;
+      actorUserId: string;
+      entityType: string;
+      entityId: string;
+      action: string;
+      beforeJson: unknown;
+      afterJson: unknown;
+      createdAt: Date;
+    }>
+  | null
+> {
   if (actor.role !== "ADMIN") return null;
   return prisma.auditLog.findMany({
     where: { createdAt: { gte: from, lte: to } },
@@ -56,6 +68,8 @@ export async function exportAuditLogs(
       entityType: true,
       entityId: true,
       action: true,
+      beforeJson: true,
+      afterJson: true,
       createdAt: true,
     },
   });

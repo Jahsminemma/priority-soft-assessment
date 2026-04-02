@@ -1,12 +1,18 @@
 import { Prisma } from "@prisma/client";
 import type {
   AssignmentCommitResponse,
+  AssignmentLaborImpact,
   AssignmentPreviewResponse,
   ModifyShiftOptions,
 } from "@shiftsync/shared";
 import { CONSTRAINT_RULE_TITLES, isoWeekKeyDbVariants, normalizeIsoWeekKey } from "@shiftsync/shared";
 import {
   evaluateAssignmentConstraints,
+  fifoStraightOtPerInterval,
+  laborUsdFromSplit,
+  resolveHourlyRateUsd,
+  roundUsd,
+  type FifoInterval,
   weekStartDateLocalFromWeekKey,
   type ConstraintContext,
   type ShiftIntervalInput,
@@ -64,7 +70,10 @@ export async function previewAssignment(
 ): Promise<AssignmentPreviewResponse> {
   const shiftSlot = await prisma.shift.findUnique({
     where: { id: shiftId },
-    include: { _count: { select: { assignments: true } } },
+    include: {
+      _count: { select: { assignments: true } },
+      location: { select: { defaultHourlyRate: true } },
+    },
   });
   if (!shiftSlot) {
     return {
@@ -101,8 +110,12 @@ export async function previewAssignment(
     };
   }
 
+  const laborImpact = await computeLaborImpactPreview(shiftSlot, staffUserId);
+
   const constraintContext = await buildConstraintContext(shiftId, staffUserId);
-  const { hard, warnings } = evaluateAssignmentConstraints(constraintContext, {});
+  const { hard, warnings } = evaluateAssignmentConstraints(constraintContext, {
+    seventhDayOverrideReason: modifyOpts?.seventhDayOverrideReason,
+  });
   const ok = hard.length === 0;
   const alternatives = ok ? [] : await findAlternatives(shiftId, 5);
   const eligibleIds = new Set(alternatives.map((a) => a.staffUserId));
@@ -115,6 +128,81 @@ export async function previewAssignment(
     warnings,
     alternatives,
     ineligibleCandidates,
+    laborImpact,
+  };
+}
+
+async function computeLaborImpactPreview(
+  shiftSlot: {
+    id: string;
+    startAtUtc: Date;
+    endAtUtc: Date;
+    weekKey: string;
+    locationId: string;
+    location: { defaultHourlyRate: number | null };
+  },
+  staffUserId: string,
+): Promise<AssignmentLaborImpact> {
+  const weekKeys = isoWeekKeyDbVariants(normalizeIsoWeekKey(shiftSlot.weekKey));
+  const [staff, existingAssignments] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: staffUserId },
+      select: { hourlyRate: true },
+    }),
+    prisma.shiftAssignment.findMany({
+      where: {
+        staffUserId,
+        shift: { locationId: shiftSlot.locationId, weekKey: { in: weekKeys } },
+      },
+      include: { shift: true },
+    }),
+  ]);
+
+  const rate = resolveHourlyRateUsd(staff?.hourlyRate ?? null, shiftSlot.location.defaultHourlyRate);
+
+  const hypoDuration = (shiftSlot.endAtUtc.getTime() - shiftSlot.startAtUtc.getTime()) / 60_000;
+  const hypoId = `__hypo__${shiftSlot.id}`;
+
+  const existingIntervals: FifoInterval[] = existingAssignments.map((a) => ({
+    id: a.id,
+    startMs: a.shift.startAtUtc.getTime(),
+    durationMin: (a.shift.endAtUtc.getTime() - a.shift.startAtUtc.getTime()) / 60_000,
+  }));
+
+  let baselineLabor = 0;
+  if (existingIntervals.length > 0) {
+    const baselineMap = fifoStraightOtPerInterval(existingIntervals);
+    for (const a of existingAssignments) {
+      const split = baselineMap.get(a.id)!;
+      baselineLabor += laborUsdFromSplit(split.straightMin, split.otMin, rate);
+    }
+  }
+
+  const projectedIntervals: FifoInterval[] = [
+    ...existingIntervals,
+    { id: hypoId, startMs: shiftSlot.startAtUtc.getTime(), durationMin: hypoDuration },
+  ];
+  const projectedMap = fifoStraightOtPerInterval(projectedIntervals);
+
+  let projectedLabor = 0;
+  for (const a of existingAssignments) {
+    const split = projectedMap.get(a.id)!;
+    projectedLabor += laborUsdFromSplit(split.straightMin, split.otMin, rate);
+  }
+  const hypoSplit = projectedMap.get(hypoId)!;
+  projectedLabor += laborUsdFromSplit(hypoSplit.straightMin, hypoSplit.otMin, rate);
+
+  const weeklyBaselineMinutes = existingIntervals.reduce((s, i) => s + i.durationMin, 0);
+
+  return {
+    hourlyRateUsd: roundUsd(rate),
+    weeklyBaselineMinutes: Math.round(weeklyBaselineMinutes),
+    weeklyAfterMinutes: Math.round(weeklyBaselineMinutes + hypoDuration),
+    hypotheticalShiftStraightMinutes: Math.round(hypoSplit.straightMin),
+    hypotheticalShiftOtMinutes: Math.round(hypoSplit.otMin),
+    baselineLaborUsd: roundUsd(baselineLabor),
+    projectedLaborUsd: roundUsd(projectedLabor),
+    deltaLaborUsd: roundUsd(projectedLabor - baselineLabor),
   };
 }
 
@@ -261,13 +349,18 @@ export async function commitAssignment(
         },
       });
 
+      const trimmedSeventh = seventhDayOverrideReason?.trim();
       await tx.auditLog.create({
         data: {
           actorUserId: actor.id,
           entityType: "ShiftAssignment",
           entityId: created.id,
           action: "CREATE",
-          afterJson: { shiftId, staffUserId } as Prisma.InputJsonValue,
+          afterJson: {
+            shiftId,
+            staffUserId,
+            ...(trimmedSeventh ? { seventhDayOverrideReason: trimmedSeventh } : {}),
+          } as Prisma.InputJsonValue,
         },
       });
 

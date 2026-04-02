@@ -13,17 +13,27 @@ type Props = {
   onClose: () => void;
   token: string;
   shiftId: string;
+  /** When set, swap is blocked until the user cancels this DROP request. */
+  pendingDropRequestId?: string | null;
 };
 
-export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props): React.ReactElement | null {
+export function StaffRequestSwapDialog({
+  open,
+  onClose,
+  token,
+  shiftId,
+  pendingDropRequestId = null,
+}: Props): React.ReactElement | null {
   const queryClient = useQueryClient();
   const [selectedKey, setSelectedKey] = useState("");
   const [successOpen, setSuccessOpen] = useState(false);
 
+  const dropBlocksSwap = Boolean(pendingDropRequestId);
+
   const candidatesQuery = useQuery({
     queryKey: ["swapCandidates", token, shiftId],
     queryFn: ({ signal }) => fetchSwapCandidates(token, shiftId, signal),
-    enabled: open && Boolean(token && shiftId),
+    enabled: open && Boolean(token && shiftId) && !dropBlocksSwap,
   });
 
   useEffect(() => {
@@ -57,7 +67,7 @@ export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props)
   }, [open, successOpen, onClose]);
 
   const swapPayload = candidatesQuery.data;
-  const rows = swapPayload?.candidates ?? [];
+  const rows = dropBlocksSwap ? [] : (swapPayload?.candidates ?? []);
   const tz = swapPayload?.locationTzIana ?? "UTC";
   const selected = rows.find((r) => pairKey(r.staffUserId, r.secondShiftId) === selectedKey);
 
@@ -98,7 +108,7 @@ export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props)
 
   if (!open && !successOpen) return null;
 
-  const swapBlocked = swapPayload?.hasPendingSwapRequest === true;
+  const swapBlocked = !dropBlocksSwap && swapPayload?.hasPendingSwapRequest === true;
 
   return (
     <>
@@ -133,13 +143,21 @@ export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props)
               </button>
             </div>
             <div className="schedule-modal__scroll">
-              {candidatesQuery.isLoading ? <p className="muted">Loading swap options…</p> : null}
-              {candidatesQuery.isError ? (
+              {dropBlocksSwap ? (
+                <div className="staff-swap-modal__blocked muted" role="status">
+                  <p>
+                    You have an open <strong>drop</strong> offer for this shift. Cancel your drop request first, then you
+                    can request a swap.
+                  </p>
+                </div>
+              ) : null}
+              {!dropBlocksSwap && candidatesQuery.isLoading ? <p className="muted">Loading swap options…</p> : null}
+              {!dropBlocksSwap && candidatesQuery.isError ? (
                 <p className="text-error">
                   {candidatesQuery.error instanceof Error ? candidatesQuery.error.message : "Could not load list."}
                 </p>
               ) : null}
-              {candidatesQuery.isSuccess && swapBlocked ? (
+              {!dropBlocksSwap && candidatesQuery.isSuccess && swapBlocked ? (
                 <div className="staff-swap-modal__blocked muted" role="status">
                   <p>
                     You already have a <strong>swap request in progress</strong> for this shift (waiting on your teammate or a
@@ -161,7 +179,7 @@ export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props)
                   ) : null}
                 </div>
               ) : null}
-              {candidatesQuery.isSuccess && !swapBlocked && rows.length === 0 ? (
+              {!dropBlocksSwap && candidatesQuery.isSuccess && !swapBlocked && rows.length === 0 ? (
                 <p className="muted">
                   No teammate has a published shift this week you can legally trade with. Try{" "}
                   <strong>Offer shift (drop)</strong> if you only want to give your shift up for pickup.
@@ -211,7 +229,7 @@ export function StaffRequestSwapDialog({ open, onClose, token, shiftId }: Props)
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={swapBlocked || !selected || swapMut.isPending || rows.length === 0}
+                disabled={dropBlocksSwap || swapBlocked || !selected || swapMut.isPending || rows.length === 0}
                 onClick={() => void swapMut.mutateAsync()}
               >
                 {swapMut.isPending ? "Sending…" : "Send swap request"}

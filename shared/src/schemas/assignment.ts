@@ -13,6 +13,8 @@ export const ConstraintViolationCodeSchema = z.enum([
   "WEEKLY_WARN_40",
   "CONSECUTIVE_SIXTH_DAY",
   "WEEKLY_SEVENTH_DAY",
+  /** 7th consecutive day allowed because a manager supplied a documented override (preview/commit warning). */
+  "WEEKLY_SEVENTH_DAY_OVERRIDE",
   /** Shift already has assignments equal to headcount. */
   "HEADCOUNT_FULL",
   /** Preview/commit target shift does not exist (or was removed). */
@@ -36,6 +38,7 @@ export const CONSTRAINT_RULE_TITLES: Record<ConstraintViolationCode, string> = {
   WEEKLY_WARN_40: "Weekly hours (overtime risk)",
   CONSECUTIVE_SIXTH_DAY: "Consecutive work days",
   WEEKLY_SEVENTH_DAY: "Seventh day in a row",
+  WEEKLY_SEVENTH_DAY_OVERRIDE: "Seventh day — manager override",
   HEADCOUNT_FULL: "Shift is fully staffed",
   SHIFT_NOT_FOUND: "Shift not found",
   SCHEDULE_CUTOFF: "Schedule edit window closed",
@@ -61,6 +64,7 @@ export const AssignmentPreviewRequestSchema = z.object({
   shiftId: z.string().uuid(),
   staffUserId: z.string().uuid(),
   emergencyOverrideReason: emergencyOverrideField,
+  seventhDayOverrideReason: z.string().optional(),
 });
 
 export type AssignmentPreviewRequest = z.infer<typeof AssignmentPreviewRequestSchema>;
@@ -73,6 +77,20 @@ export const StaffAlternativeSchema = z.object({
 
 export type StaffAlternative = z.infer<typeof StaffAlternativeSchema>;
 
+/** Weekly OT projection for this site/week if this assignment is added (FIFO by shift start, 40h straight cap). */
+export const AssignmentLaborImpactSchema = z.object({
+  hourlyRateUsd: z.number(),
+  weeklyBaselineMinutes: z.number(),
+  weeklyAfterMinutes: z.number(),
+  hypotheticalShiftStraightMinutes: z.number(),
+  hypotheticalShiftOtMinutes: z.number(),
+  baselineLaborUsd: z.number(),
+  projectedLaborUsd: z.number(),
+  deltaLaborUsd: z.number(),
+});
+
+export type AssignmentLaborImpact = z.infer<typeof AssignmentLaborImpactSchema>;
+
 export const AssignmentPreviewResponseSchema = z.object({
   ok: z.boolean(),
   hardViolations: z.array(ConstraintViolationSchema),
@@ -84,6 +102,7 @@ export const AssignmentPreviewResponseSchema = z.object({
    * with a concise reason (which rule blocks them). Helps compare options when the first pick fails.
    */
   ineligibleCandidates: z.array(StaffAlternativeSchema),
+  laborImpact: AssignmentLaborImpactSchema.optional(),
 });
 
 export type AssignmentPreviewResponse = z.infer<typeof AssignmentPreviewResponseSchema>;

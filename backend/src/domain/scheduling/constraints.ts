@@ -335,6 +335,13 @@ export function evaluateAssignmentConstraints(
         message: "A 7th consecutive work day in the week is blocked unless you add a documented manager reason below.",
         severity: "hard",
       });
+    } else {
+      warnings.push({
+        code: "WEEKLY_SEVENTH_DAY_OVERRIDE",
+        message:
+          "This assignment is a 7th consecutive work day in the week. The documented manager override is stored on the assignment audit record (shift audit / admin export).",
+        severity: "warn",
+      });
     }
   }
 

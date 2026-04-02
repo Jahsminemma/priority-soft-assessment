@@ -44,7 +44,21 @@ export const ManagerCoverageQueueItemSchema = z.object({
   canApprove: z.boolean(),
   /** Present for DROP while still open for pickup. */
   expiresAt: z.string().nullable(),
+  /** DROP only: how the callout behaves. */
+  calloutMode: z.enum(["OPEN", "DIRECTED"]).nullable(),
+  /** DROP PENDING: staff who can take this shift (for manager assign). */
+  eligibleCandidates: z.array(z.object({ id: z.string().uuid(), name: z.string() })),
 });
+
+export const OpenCalloutItemSchema = z.object({
+  requestId: z.string().uuid(),
+  requesterId: z.string().uuid(),
+  requesterName: z.string(),
+  shift: CoverageShiftSummarySchema,
+});
+
+export const OpenCalloutListSchema = z.array(OpenCalloutItemSchema);
+export type OpenCalloutItem = z.infer<typeof OpenCalloutItemSchema>;
 
 export const ManagerCoverageQueueSchema = z.array(ManagerCoverageQueueItemSchema);
 export type ManagerCoverageQueueItem = z.infer<typeof ManagerCoverageQueueItemSchema>;

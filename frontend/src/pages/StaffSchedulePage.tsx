@@ -1,7 +1,13 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createCoverageRequest, fetchLocations, fetchShiftsStaff, fetchSkills } from "../api.js";
+import {
+  cancelCoverageRequest,
+  createCoverageRequest,
+  fetchLocations,
+  fetchShiftsStaff,
+  fetchSkills,
+} from "../api.js";
 import { FeedbackModal } from "../components/FeedbackModal.js";
 import { StaffRequestSwapDialog } from "../components/StaffRequestSwapDialog.js";
 import { useAuth } from "../context/AuthContext.js";
@@ -22,6 +28,7 @@ export default function StaffSchedulePage(): React.ReactElement {
   const [weekKey, setWeekKey] = useState(() => normalizeIsoWeekKey(initialWeekKeyFromToday()));
   const [swapShiftId, setSwapShiftId] = useState<string | null>(null);
   const [calloutSuccessOpen, setCalloutSuccessOpen] = useState(false);
+  const [cancelOfferSuccessOpen, setCancelOfferSuccessOpen] = useState(false);
 
   const weekKeyNorm = normalizeIsoWeekKey(weekKey);
   const shiftsQuery = useQuery({
@@ -57,6 +64,15 @@ export default function StaffSchedulePage(): React.ReactElement {
     },
   });
 
+  const cancelDropMut = useMutation({
+    mutationFn: (requestId: string) => cancelCoverageRequest(token!, requestId),
+    onSuccess: () => {
+      setCancelOfferSuccessOpen(true);
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.invalidateQueries({ queryKey: ["shifts"] });
+    },
+  });
+
   const locById = useMemo(
     () => new Map((locationsQuery.data ?? []).map((l) => [l.id, l])),
     [locationsQuery.data],
@@ -71,6 +87,11 @@ export default function StaffSchedulePage(): React.ReactElement {
     const locs = locationsQuery.data ?? [];
     return groupStaffShiftsByDay(shifts, locs);
   }, [shiftsQuery.data, locationsQuery.data]);
+
+  const pendingDropIdForSwapDialog = useMemo(() => {
+    if (!swapShiftId) return null;
+    return shiftsQuery.data?.find((s) => s.id === swapShiftId)?.pendingDropRequestId ?? null;
+  }, [swapShiftId, shiftsQuery.data]);
 
   if (!isStaff) {
     return (
@@ -104,6 +125,11 @@ export default function StaffSchedulePage(): React.ReactElement {
       {calloutMut.isError ? (
         <p className="text-error staff-schedule__status">
           {calloutMut.error instanceof Error ? calloutMut.error.message : "Could not submit callout request."}
+        </p>
+      ) : null}
+      {cancelDropMut.isError ? (
+        <p className="text-error staff-schedule__status">
+          {cancelDropMut.error instanceof Error ? cancelDropMut.error.message : "Could not cancel offer."}
         </p>
       ) : null}
       <div className="staff-schedule__days">
@@ -150,19 +176,43 @@ export default function StaffSchedulePage(): React.ReactElement {
                         <button
                           type="button"
                           className="btn btn--secondary btn--sm staff-schedule__shift-btn"
-                          disabled={calloutMut.isPending}
-                          onClick={() => void calloutMut.mutateAsync(s.id)}
+                          disabled={
+                            (calloutMut.isPending && calloutMut.variables === s.id) ||
+                            (cancelDropMut.isPending && cancelDropMut.variables === s.pendingDropRequestId)
+                          }
+                          onClick={() =>
+                            s.pendingDropRequestId
+                              ? void cancelDropMut.mutateAsync(s.pendingDropRequestId)
+                              : void calloutMut.mutateAsync(s.id)
+                          }
                         >
-                          {calloutMut.isPending && calloutMut.variables === s.id ? "Sending…" : "Request callout"}
+                          {s.pendingDropRequestId
+                            ? cancelDropMut.isPending && cancelDropMut.variables === s.pendingDropRequestId
+                              ? "Cancelling…"
+                              : "Cancel offer"
+                            : calloutMut.isPending && calloutMut.variables === s.id
+                              ? "Sending…"
+                              : "Request callout"}
                         </button>
                         <button
                           type="button"
                           className="btn btn--secondary btn--sm staff-schedule__shift-btn"
+                          disabled={Boolean(s.pendingDropRequestId)}
+                          title={
+                            s.pendingDropRequestId
+                              ? "Cancel your drop offer before requesting a swap."
+                              : undefined
+                          }
                           onClick={() => setSwapShiftId(s.id)}
                         >
                           Request swap
                         </button>
                       </div>
+                      {s.pendingDropRequestId ? (
+                        <p className="muted small staff-schedule__swap-blocked-hint">
+                          Cancel your drop request before you can request a swap.
+                        </p>
+                      ) : null}
                     </article>
                   </li>
                 );
@@ -185,6 +235,7 @@ export default function StaffSchedulePage(): React.ReactElement {
           onClose={() => setSwapShiftId(null)}
           token={token}
           shiftId={swapShiftId}
+          pendingDropRequestId={pendingDropIdForSwapDialog}
         />
       ) : null}
 
@@ -194,6 +245,13 @@ export default function StaffSchedulePage(): React.ReactElement {
         title="Callout posted"
         message="Your shift is offered for pickup. You stay assigned until a manager approves. Watch Notifications for updates."
         onClose={() => setCalloutSuccessOpen(false)}
+      />
+      <FeedbackModal
+        open={cancelOfferSuccessOpen}
+        variant="success"
+        title="Offer withdrawn"
+        message="Your drop offer was cancelled. You remain assigned to this shift."
+        onClose={() => setCancelOfferSuccessOpen(false)}
       />
     </div>
   );

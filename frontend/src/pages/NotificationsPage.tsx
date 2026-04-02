@@ -4,6 +4,7 @@ import {
   acceptCoverageRequest,
   approveCoverageRequest,
   cancelCoverageRequest,
+  claimCoverageRequest,
   declineCoverageRequest,
   fetchNotifications,
   markNotificationReadApi,
@@ -18,13 +19,14 @@ function notificationCardActions(
   n: NotificationDto,
   requestId: string | undefined,
   role: string | undefined,
-): Array<"accept" | "reject" | "approve" | "withdraw"> {
+): Array<"accept" | "reject" | "approve" | "withdraw" | "claim"> {
   if (!requestId) return [];
   const p = typeof n.payload === "object" && n.payload !== null ? (n.payload as Record<string, unknown>) : {};
   const requestStatus = typeof p.requestStatus === "string" ? p.requestStatus : undefined;
   // Persistently hide actions for non-actionable requests.
   if (requestStatus && requestStatus !== "PENDING" && requestStatus !== "ACCEPTED") return [];
   if (n.type === "coverage.swap_requested" && role === "STAFF") return ["accept", "reject"];
+  if (n.type === "coverage.callout_open" && role === "STAFF") return ["claim"];
   if (n.type === "coverage.ready_for_approval" && (role === "MANAGER" || role === "ADMIN")) return ["approve"];
   if (n.type === "coverage.accepted" && role === "STAFF") return ["withdraw"];
   return [];
@@ -51,6 +53,8 @@ export default function NotificationsPage(): React.ReactElement {
     void queryClient.invalidateQueries({ queryKey: ["notifications"] });
     void queryClient.invalidateQueries({ queryKey: ["shifts"] });
     void queryClient.invalidateQueries({ queryKey: ["swapCandidates"] });
+    void queryClient.invalidateQueries({ queryKey: ["openCallouts"] });
+    void queryClient.invalidateQueries({ queryKey: ["managerCoverageQueue"] });
   }, [queryClient]);
 
   const markResolved = useCallback((rid: string) => {
@@ -78,6 +82,27 @@ export default function NotificationsPage(): React.ReactElement {
         title: "Couldn’t accept",
         message: messageFromError(err, "Accept failed. Please try again."),
       });
+    },
+  });
+
+  const claimMut = useMutation({
+    mutationFn: (requestId: string) => claimCoverageRequest(token!, requestId),
+    onSuccess: (_, rid) => {
+      markResolved(rid);
+      setFeedbackModal({
+        variant: "success",
+        title: "Shift claimed",
+        message: "You’re assigned to this shift. Others can no longer claim it.",
+      });
+      inv();
+    },
+    onError: (err) => {
+      setFeedbackModal({
+        variant: "error",
+        title: "Couldn’t claim",
+        message: messageFromError(err, "Claim failed. It may have been filled by someone else."),
+      });
+      inv();
     },
   });
 
@@ -183,6 +208,7 @@ export default function NotificationsPage(): React.ReactElement {
 
   const busyFor = (rid: string): boolean =>
     (acceptMut.isPending && acceptMut.variables === rid) ||
+    (claimMut.isPending && claimMut.variables === rid) ||
     (approveMut.isPending && approveMut.variables === rid) ||
     (withdrawMut.isPending && withdrawMut.variables === rid) ||
     (rejectMut.isPending && rejectMut.variables === rid);
@@ -220,13 +246,15 @@ export default function NotificationsPage(): React.ReactElement {
               typeof n.payload === "object" && n.payload !== null ? (n.payload as Record<string, unknown>) : {};
             const requestStatus = typeof payloadObj.requestStatus === "string" ? payloadObj.requestStatus : undefined;
             const statusLabel =
-              requestStatus === "MANAGER_APPROVED"
-                ? "Approved"
-                : requestStatus === "DECLINED"
-                  ? "Declined"
-                  : requestStatus === "CANCELLED"
-                    ? "Cancelled"
-                    : requestStatus === "EXPIRED"
+              requestStatus === "MANAGER_APPROVED" && n.type === "coverage.callout_open"
+                ? "Filled"
+                : requestStatus === "MANAGER_APPROVED"
+                  ? "Approved"
+                  : requestStatus === "DECLINED"
+                    ? "Declined"
+                    : requestStatus === "CANCELLED"
+                      ? "Cancelled"
+                      : requestStatus === "EXPIRED"
                       ? "Expired"
                       : requestStatus === "ACCEPTED"
                         ? "Accepted"
@@ -269,6 +297,20 @@ export default function NotificationsPage(): React.ReactElement {
 
                   {actions.length > 0 && rid ? (
                     <div className="notification-card__actions">
+                      {actions.includes("claim") ? (
+                        <button
+                          type="button"
+                          className="btn btn--primary btn--sm"
+                          disabled={busyFor(rid)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (unread) markRead(n.id);
+                            void claimMut.mutateAsync(rid);
+                          }}
+                        >
+                          {claimMut.isPending && claimMut.variables === rid ? "Working…" : "Claim shift"}
+                        </button>
+                      ) : null}
                       {actions.includes("accept") ? (
                         <button
                           type="button"

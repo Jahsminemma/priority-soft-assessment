@@ -11,6 +11,7 @@ function buildInviteUrl(token: string): string {
 export default function TeamPage(): React.ReactElement {
   const { token, user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
+  const canViewTeam = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -34,7 +35,7 @@ export default function TeamPage(): React.ReactElement {
   const teamQuery = useQuery({
     queryKey: ["admin", "team", token],
     queryFn: () => fetchTeam(token!),
-    enabled: Boolean(isAdmin && token),
+    enabled: Boolean(canViewTeam && token),
   });
 
   const patchLocationsMutation = useMutation({
@@ -137,12 +138,12 @@ export default function TeamPage(): React.ReactElement {
     }
   }
 
-  if (!isAdmin) {
+  if (!canViewTeam) {
     return (
       <div className="page">
         <h1 className="page__title">Team</h1>
         <div className="card">
-          <p className="muted">Only administrators can view team and create invites.</p>
+          <p className="muted">Only managers and administrators can view the team roster.</p>
         </div>
       </div>
     );
@@ -154,7 +155,9 @@ export default function TeamPage(): React.ReactElement {
     <div className="page">
       <h1 className="page__title">Team</h1>
       <p className="page__lead muted">
-        Managers and staff who already have accounts. Invite someone new with a one-time registration link below.
+        {isAdmin
+          ? "Managers and staff who already have accounts. Invite someone new with a one-time registration link below."
+          : "People at sites you manage: managers for those locations and staff certified at those sites."}
       </p>
 
       <div className="card stack">
@@ -210,7 +213,7 @@ export default function TeamPage(): React.ReactElement {
                 <th>Locations</th>
                 <th>Skills</th>
                 <th>Desired hrs / week</th>
-                <th aria-label="Actions" />
+                {isAdmin ? <th aria-label="Actions" /> : null}
               </tr>
             </thead>
             <tbody>
@@ -234,28 +237,30 @@ export default function TeamPage(): React.ReactElement {
                       )}
                     </td>
                     <td>{s.desiredHoursWeekly == null ? "—" : String(s.desiredHoursWeekly)}</td>
-                    <td>
-                      {editingStaffId === s.id ? (
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={() => {
-                            setEditingStaffId(null);
-                            setLocationEditError(null);
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={() => beginEditLocations(s.id, s.locations.map((l) => l.id))}
-                        >
-                          Edit locations
-                        </button>
-                      )}
-                    </td>
+                    {isAdmin ? (
+                      <td>
+                        {editingStaffId === s.id ? (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => {
+                              setEditingStaffId(null);
+                              setLocationEditError(null);
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => beginEditLocations(s.id, s.locations.map((l) => l.id))}
+                          >
+                            Edit locations
+                          </button>
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                   {editingStaffId === s.id ? (
                     <tr>
@@ -300,6 +305,7 @@ export default function TeamPage(): React.ReactElement {
         ) : null}
       </div>
 
+      {isAdmin ? (
       <div className="card stack">
         <h2 className="card__title">Invite someone</h2>
         <p className="muted small">
@@ -418,8 +424,9 @@ export default function TeamPage(): React.ReactElement {
           </button>
         </form>
       </div>
+      ) : null}
 
-      {lastInvite ? (
+      {isAdmin && lastInvite ? (
         <div className="card stack invite-result">
           <h2 className="card__title">Share this link</h2>
           <p className="muted small">Expires {expiresLabel}</p>
