@@ -28,7 +28,9 @@ coverageRouter.post("/", authMiddleware, requireRoles("STAFF"), async (req: Auth
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg === "MAX_PENDING_COVERAGE") {
-      res.status(400).json({ error: "Maximum 3 pending coverage requests" });
+      res.status(400).json({
+        error: "You can have at most 3 open swap or drop requests (waiting on a coworker or manager).",
+      });
       return;
     }
     if (msg === "NOT_ASSIGNED_TO_SHIFT") {
@@ -45,6 +47,12 @@ coverageRouter.post("/", authMiddleware, requireRoles("STAFF"), async (req: Auth
     }
     if (msg === "TARGET_NOT_ON_SECOND_SHIFT") {
       res.status(400).json({ error: "Target must be assigned to secondShiftId for a two-way swap" });
+      return;
+    }
+    if (msg === "SWAP_ALREADY_PENDING") {
+      res.status(400).json({
+        error: "You already have a swap request in progress for this shift. Cancel it or wait until it is resolved.",
+      });
       return;
     }
     throw e;

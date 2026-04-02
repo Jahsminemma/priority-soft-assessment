@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EMERGENCY_OVERRIDE_MIN_LEN } from "../emergency.js";
 import { normalizeIsoWeekKey } from "../weekKey.js";
 
 export const ShiftStatusSchema = z.enum(["DRAFT", "PUBLISHED"]);
@@ -60,9 +61,21 @@ export const UpdateShiftRequestSchema = z
     startAtUtc: z.string().datetime().optional(),
     endAtUtc: z.string().datetime().optional(),
     headcount: z.number().int().positive().optional(),
+    /** When the edit window has closed for managers, provide a reason (min length) to proceed. */
+    emergencyOverrideReason: z
+      .string()
+      .trim()
+      .min(EMERGENCY_OVERRIDE_MIN_LEN)
+      .max(2000)
+      .optional(),
   })
   .refine((b) => b.startAtUtc !== undefined || b.endAtUtc !== undefined || b.headcount !== undefined, {
     message: "at_least_one_field",
   });
 
 export type UpdateShiftRequest = z.infer<typeof UpdateShiftRequestSchema>;
+
+/** Options for gated operations on published shifts (per-shift cutoff). */
+export type ModifyShiftOptions = {
+  emergencyOverrideReason?: string | undefined;
+};

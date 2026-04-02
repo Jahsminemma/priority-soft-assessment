@@ -6,9 +6,11 @@ import {
   ShiftDtoSchema,
   UpdateShiftRequestSchema,
 } from "@shiftsync/shared";
+import { listSwapCandidatesForAssignedStaff } from "../../application/assignments/index.js";
 import {
   createShift,
   deleteShift,
+  getShiftForViewer,
   listAssignmentsForShift,
   listPublishedShiftsForStaff,
   listShiftsByLocationWeek,
@@ -22,7 +24,7 @@ export const shiftsRouter = Router();
 shiftsRouter.get(
   "/:id/assignments",
   authMiddleware,
-  requireRoles("ADMIN", "MANAGER"),
+  requireRoles("ADMIN", "MANAGER", "STAFF"),
   async (req: AuthedRequest, res) => {
     const user = req.user;
     if (!user) {
@@ -42,6 +44,53 @@ shiftsRouter.get(
     res.json(out.rows);
   },
 );
+
+shiftsRouter.get(
+  "/:id/swap-candidates",
+  authMiddleware,
+  requireRoles("STAFF"),
+  async (req: AuthedRequest, res) => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const shiftId = singleParam(req.params["id"]);
+    if (!shiftId) {
+      res.status(400).json({ error: "Missing shift id" });
+      return;
+    }
+    const out = await listSwapCandidatesForAssignedStaff(user, shiftId);
+    if (!out.ok) {
+      const status = out.reason === "NOT_FOUND" ? 404 : 403;
+      res.status(status).json({ error: out.reason });
+      return;
+    }
+    res.json({
+      candidates: out.candidates,
+      hasPendingSwapRequest: out.hasPendingSwapRequest,
+    });
+  },
+);
+
+shiftsRouter.get("/:id", authMiddleware, async (req: AuthedRequest, res) => {
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const shiftId = singleParam(req.params["id"]);
+  if (!shiftId) {
+    res.status(400).json({ error: "Missing shift id" });
+    return;
+  }
+  const shift = await getShiftForViewer(user, shiftId);
+  if (!shift) {
+    res.status(404).json({ error: "NOT_FOUND" });
+    return;
+  }
+  res.json(ShiftDtoSchema.parse(shift));
+});
 
 shiftsRouter.get("/", authMiddleware, async (req: AuthedRequest, res) => {
   const user = req.user;
@@ -142,7 +191,9 @@ shiftsRouter.delete(
       res.status(400).json({ error: "Missing shift id" });
       return;
     }
-    const out = await deleteShift(user, sid);
+    const emergencyOverrideReason =
+      typeof req.query["emergencyOverrideReason"] === "string" ? req.query["emergencyOverrideReason"] : undefined;
+    const out = await deleteShift(user, sid, { emergencyOverrideReason });
     if ("error" in out) {
       const status =
         out.error === "NOT_FOUND" ? 404 : out.error === "PAST_CUTOFF" ? 400 : 403;

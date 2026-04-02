@@ -1,8 +1,13 @@
 import { Prisma } from "@prisma/client";
-import type { AssignmentCommitResponse, AssignmentPreviewResponse } from "@shiftsync/shared";
-import { CONSTRAINT_RULE_TITLES } from "@shiftsync/shared";
+import type {
+  AssignmentCommitResponse,
+  AssignmentPreviewResponse,
+  ModifyShiftOptions,
+} from "@shiftsync/shared";
+import { CONSTRAINT_RULE_TITLES, isoWeekKeyDbVariants, normalizeIsoWeekKey } from "@shiftsync/shared";
 import {
   evaluateAssignmentConstraints,
+  weekStartDateLocalFromWeekKey,
   type ConstraintContext,
   type ShiftIntervalInput,
 } from "../../domain/scheduling/index.js";
@@ -23,7 +28,7 @@ function gateResponseFromModifyShift(
         {
           code: "SCHEDULE_CUTOFF",
           message:
-            "This shift is on a published schedule and the edit window has closed (default: 48 hours before the shift starts). Unpublish the week to make changes, or ask an administrator.",
+            "This schedule is locked: we are within the edit cutoff before this shift (default: 48 hours). For urgent changes, use the emergency coverage workflow: add emergencyOverrideReason (min. 10 characters) on the request, or ask an administrator.",
           severity: "hard",
         },
       ],
@@ -54,6 +59,7 @@ export async function previewAssignment(
   shiftId: string,
   staffUserId: string,
   actor: AuthedUser,
+  modifyOpts?: ModifyShiftOptions,
 ): Promise<AssignmentPreviewResponse> {
   const shiftSlot = await prisma.shift.findUnique({
     where: { id: shiftId },
@@ -74,7 +80,7 @@ export async function previewAssignment(
       ineligibleCandidates: [],
     };
   }
-  const gate = await canModifyShift(actor, shiftId);
+  const gate = await canModifyShift(actor, shiftId, modifyOpts);
   const gated = gateResponseFromModifyShift(gate);
   if (gated) return gated;
 
@@ -114,6 +120,7 @@ export async function previewAssignment(
 export async function removeAssignment(
   assignmentId: string,
   actor: AuthedUser,
+  modifyOpts?: ModifyShiftOptions,
 ): Promise<{ ok: true } | { ok: false; reason: "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF" }> {
   const row = await prisma.shiftAssignment.findUnique({
     where: { id: assignmentId },
@@ -121,7 +128,7 @@ export async function removeAssignment(
   });
   if (!row) return { ok: false, reason: "NOT_FOUND" };
 
-  const gate = await canModifyShift(actor, row.shiftId);
+  const gate = await canModifyShift(actor, row.shiftId, modifyOpts);
   if (!gate.ok) {
     if (gate.code === "PAST_CUTOFF") return { ok: false, reason: "PAST_CUTOFF" };
     return { ok: false, reason: "FORBIDDEN" };
@@ -155,6 +162,7 @@ export async function commitAssignment(
   idempotencyKey: string,
   seventhDayOverrideReason: string | undefined,
   actor: AuthedUser,
+  modifyOpts?: ModifyShiftOptions,
 ): Promise<AssignmentCommitResponse> {
   const existing = await prisma.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
   if (existing) {
@@ -175,7 +183,7 @@ export async function commitAssignment(
     };
   }
 
-  const modifyGate = await canModifyShift(actor, shiftId);
+  const modifyGate = await canModifyShift(actor, shiftId, modifyOpts);
   if (!modifyGate.ok) {
     if (modifyGate.code === "PAST_CUTOFF") {
       return {
@@ -184,7 +192,7 @@ export async function commitAssignment(
           {
             code: "SCHEDULE_CUTOFF",
             message:
-              "This shift is on a published schedule and the edit window has closed. Unpublish the week or ask an administrator.",
+              "This schedule is locked within the edit cutoff before this shift. For urgent changes, use emergency coverage with emergencyOverrideReason on the request, or ask an administrator.",
             severity: "hard",
           },
         ],
@@ -276,7 +284,13 @@ export async function commitAssignment(
 
     const shiftRow = await prisma.shift.findUniqueOrThrow({
       where: { id: shiftId },
-      select: { locationId: true, startAtUtc: true, endAtUtc: true, weekKey: true },
+      select: {
+        locationId: true,
+        startAtUtc: true,
+        endAtUtc: true,
+        weekKey: true,
+        location: { select: { tzIana: true } },
+      },
     });
     emitAssignmentChanged(shiftRow.locationId, {
       shiftId,
@@ -284,14 +298,26 @@ export async function commitAssignment(
       assignmentId: result.id,
     });
 
-    await createNotification(staffUserId, "assignment.created", {
-      shiftId,
-      assignmentId: result.id,
-      locationId: shiftRow.locationId,
-      weekKey: shiftRow.weekKey,
-      startAtUtc: shiftRow.startAtUtc.toISOString(),
-      endAtUtc: shiftRow.endAtUtc.toISOString(),
+    const weekStartDateLocal = weekStartDateLocalFromWeekKey(shiftRow.weekKey, shiftRow.location.tzIana);
+    const scheduleWeek = await prisma.scheduleWeek.findUnique({
+      where: {
+        locationId_weekStartDateLocal: {
+          locationId: shiftRow.locationId,
+          weekStartDateLocal,
+        },
+      },
+      select: { status: true },
     });
+    if (scheduleWeek?.status === "PUBLISHED") {
+      await createNotification(staffUserId, "assignment.created", {
+        shiftId,
+        assignmentId: result.id,
+        locationId: shiftRow.locationId,
+        weekKey: shiftRow.weekKey,
+        startAtUtc: shiftRow.startAtUtc.toISOString(),
+        endAtUtc: shiftRow.endAtUtc.toISOString(),
+      });
+    }
 
     return res;
   } catch (e) {
@@ -390,6 +416,123 @@ export async function buildConstraintContext(
       type: x.type,
     })),
     otherAssignments,
+  };
+}
+
+const SWAP_PAIR_LIMIT = 40;
+
+export type SwapPairCandidate = {
+  staffUserId: string;
+  staffName: string;
+  secondShiftId: string;
+  theirShiftSkillName: string;
+  theirShiftStartAtUtc: string;
+  theirShiftEndAtUtc: string;
+};
+
+/**
+ * True two-way swap options: another staff member who already holds a published shift at the same
+ * location in the same schedule week, where (1) they could take your shift and (2) you could take
+ * theirs, with no hard constraint violations either way (skills, site cert, availability, rest,
+ * overlaps, unavailable/leave exceptions). Coworkers on the same shift are excluded.
+ */
+export async function listSwapCandidatesForAssignedStaff(
+  actor: AuthedUser,
+  shiftId: string,
+): Promise<
+  | {
+      ok: true;
+      candidates: SwapPairCandidate[];
+      hasPendingSwapRequest: boolean;
+      locationTzIana: string;
+    }
+  | { ok: false; reason: "NOT_FOUND" | "NOT_ASSIGNED" }
+> {
+  if (actor.role !== "STAFF") {
+    return { ok: false, reason: "NOT_FOUND" };
+  }
+
+  const shift = await prisma.shift.findUnique({
+    where: { id: shiftId },
+    include: { location: true },
+  });
+  if (!shift) return { ok: false, reason: "NOT_FOUND" };
+
+  const assignment = await prisma.shiftAssignment.findFirst({
+    where: { shiftId, staffUserId: actor.id, status: "ASSIGNED" },
+  });
+  if (!assignment) return { ok: false, reason: "NOT_ASSIGNED" };
+
+  const pendingSwap = await prisma.coverageRequest.findFirst({
+    where: {
+      requesterId: actor.id,
+      shiftId,
+      type: "SWAP",
+      status: { in: ["PENDING", "ACCEPTED"] },
+    },
+    select: { id: true },
+  });
+  const hasPendingSwapRequest = pendingSwap != null;
+
+  const onShift = await prisma.shiftAssignment.findMany({
+    where: { shiftId, status: "ASSIGNED" },
+    select: { staffUserId: true },
+  });
+  const alreadyOnShift = new Set(onShift.map((r) => r.staffUserId));
+
+  const weekKeys = isoWeekKeyDbVariants(normalizeIsoWeekKey(shift.weekKey));
+
+  const peerAssignments = await prisma.shiftAssignment.findMany({
+    where: {
+      staffUserId: { not: actor.id },
+      status: "ASSIGNED",
+      shift: {
+        locationId: shift.locationId,
+        weekKey: { in: weekKeys },
+        id: { not: shiftId },
+        status: "PUBLISHED",
+      },
+    },
+    include: {
+      shift: { include: { location: true, requiredSkill: true } },
+      staff: { select: { id: true, name: true } },
+    },
+  });
+
+  const out: SwapPairCandidate[] = [];
+  for (const row of peerAssignments) {
+    const peerId = row.staffUserId;
+    if (alreadyOnShift.has(peerId)) continue;
+
+    const theirShift = row.shift;
+    const ctxTheyTakeMine = await buildConstraintContext(shiftId, peerId);
+    if (evaluateAssignmentConstraints(ctxTheyTakeMine, {}).hard.length > 0) continue;
+
+    const ctxITakeTheirs = await buildConstraintContext(theirShift.id, actor.id);
+    if (evaluateAssignmentConstraints(ctxITakeTheirs, {}).hard.length > 0) continue;
+
+    const staffName = row.staff.name?.trim() ? row.staff.name.trim() : "Teammate";
+    out.push({
+      staffUserId: peerId,
+      staffName,
+      secondShiftId: theirShift.id,
+      theirShiftSkillName: theirShift.requiredSkill.name,
+      theirShiftStartAtUtc: theirShift.startAtUtc.toISOString(),
+      theirShiftEndAtUtc: theirShift.endAtUtc.toISOString(),
+    });
+    if (out.length >= SWAP_PAIR_LIMIT) break;
+  }
+
+  out.sort((a, b) => {
+    const t = a.theirShiftStartAtUtc.localeCompare(b.theirShiftStartAtUtc);
+    return t !== 0 ? t : a.staffName.localeCompare(b.staffName);
+  });
+
+  return {
+    ok: true,
+    candidates: out,
+    hasPendingSwapRequest,
+    locationTzIana: shift.location.tzIana,
   };
 }
 

@@ -1,6 +1,12 @@
 import type { Prisma } from "@prisma/client";
-import type { CreateShiftRequest, ShiftDto, UpdateShiftRequest } from "@shiftsync/shared";
-import { compareIsoWeekKeys, isoWeekKeyDbVariants, normalizeIsoWeekKey } from "@shiftsync/shared";
+import type { CreateShiftRequest, ModifyShiftOptions, ShiftDto, UpdateShiftRequest } from "@shiftsync/shared";
+import { isValidEmergencyOverrideReason } from "@shiftsync/shared";
+import {
+  compareIsoWeekKeys,
+  isoWeekKeyDbVariants,
+  normalizeIsoWeekKey,
+  ShiftDtoSchema,
+} from "@shiftsync/shared";
 import { DateTime } from "luxon";
 import {
   evaluateAssignmentConstraints,
@@ -137,19 +143,34 @@ async function buildConstraintContextForShiftTx(
   };
 }
 
-export async function canModifyShift(actor: AuthedUser, shiftId: string): Promise<ModifyShiftGate> {
+export async function canModifyShift(
+  actor: AuthedUser,
+  shiftId: string,
+  opts?: ModifyShiftOptions,
+): Promise<ModifyShiftGate> {
   const shift = await prisma.shift.findUnique({ where: { id: shiftId }, include: { location: true } });
   if (!shift) return { ok: false, code: "NOT_FOUND" };
   if (!canManageLocation(actor, shift.locationId)) return { ok: false, code: "FORBIDDEN" };
   if (actor.role === "ADMIN") return { ok: true };
-  if (shift.status === "DRAFT") return { ok: true };
-  const weekStart = weekStartDateLocalFromWeekKey(shift.weekKey, shift.location.tzIana);
+
+  const weekStart = weekStartDateLocalFromWeekKey(normalizeIsoWeekKey(shift.weekKey), shift.location.tzIana);
   const sw = await prisma.scheduleWeek.findUnique({
     where: { locationId_weekStartDateLocal: { locationId: shift.locationId, weekStartDateLocal: weekStart } },
   });
-  const cutoffHours = sw?.cutoffHours ?? 48;
+
+  /** Draft rows can exist in a published week (e.g. a shift added after publish). Gate on the week row, not shift.status. */
+  if (sw?.status !== "PUBLISHED") {
+    return { ok: true };
+  }
+
+  const cutoffHours = sw.cutoffHours ?? 48;
   const deadline = shift.startAtUtc.getTime() - cutoffHours * 60 * 60 * 1000;
-  if (Date.now() > deadline) return { ok: false, code: "PAST_CUTOFF" };
+  if (Date.now() > deadline) {
+    if (actor.role === "MANAGER" && isValidEmergencyOverrideReason(opts?.emergencyOverrideReason)) {
+      return { ok: true };
+    }
+    return { ok: false, code: "PAST_CUTOFF" };
+  }
   return { ok: true };
 }
 
@@ -193,7 +214,7 @@ export async function createShift(actor: AuthedUser, input: CreateShiftRequest):
         endAtUtc: end,
         requiredSkillId: input.requiredSkillId,
         headcount: input.headcount,
-        weekKey: input.weekKey,
+        weekKey: normalizeIsoWeekKey(input.weekKey),
         isPremium: input.isPremium ?? false,
         status: "DRAFT",
         createdById: actor.id,
@@ -222,7 +243,8 @@ export async function updateShift(
   shiftId: string,
   patch: UpdateShiftRequest,
 ): Promise<ShiftDto | { error: UpdateShiftError }> {
-  const gate = await canModifyShift(actor, shiftId);
+  const { emergencyOverrideReason, ...patchFields } = patch;
+  const gate = await canModifyShift(actor, shiftId, { emergencyOverrideReason });
   if (!gate.ok) {
     return { error: gate.code };
   }
@@ -230,8 +252,8 @@ export async function updateShift(
   const existing = await prisma.shift.findUnique({ where: { id: shiftId }, include: { location: true } });
   if (!existing) return { error: "NOT_FOUND" };
 
-  const start = patch.startAtUtc ? new Date(patch.startAtUtc) : existing.startAtUtc;
-  const end = patch.endAtUtc ? new Date(patch.endAtUtc) : existing.endAtUtc;
+  const start = patchFields.startAtUtc ? new Date(patchFields.startAtUtc) : existing.startAtUtc;
+  const end = patchFields.endAtUtc ? new Date(patchFields.endAtUtc) : existing.endAtUtc;
   if (!(end > start)) {
     throw new Error("INVALID_RANGE");
   }
@@ -277,9 +299,14 @@ export async function updateShift(
       data: {
         startAtUtc: start,
         endAtUtc: end,
-        headcount: patch.headcount ?? existing.headcount,
+        headcount: patchFields.headcount ?? existing.headcount,
       },
     });
+    const afterDto = shiftRecordToDto(shift) as object;
+    const afterWithEmergency =
+      emergencyOverrideReason && isValidEmergencyOverrideReason(emergencyOverrideReason)
+        ? ({ ...afterDto, emergencyOverrideReason } as object)
+        : afterDto;
     await tx.auditLog.create({
       data: {
         actorUserId: actor.id,
@@ -287,7 +314,7 @@ export async function updateShift(
         entityId: shift.id,
         action: "UPDATE",
         beforeJson: shiftRecordToDto(existing) as object,
-        afterJson: shiftRecordToDto(shift) as object,
+        afterJson: afterWithEmergency,
       },
     });
     return shift;
@@ -303,8 +330,9 @@ export type DeleteShiftError = "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF";
 export async function deleteShift(
   actor: AuthedUser,
   shiftId: string,
+  opts?: ModifyShiftOptions,
 ): Promise<{ ok: true } | { error: DeleteShiftError }> {
-  const gate = await canModifyShift(actor, shiftId);
+  const gate = await canModifyShift(actor, shiftId, opts);
   if (!gate.ok) {
     return { error: gate.code };
   }
@@ -335,10 +363,49 @@ export type ListAssignmentsResult =
   | { ok: true; rows: Array<{ assignmentId: string; staffUserId: string; staffName: string; staffEmail: string }> }
   | { ok: false; reason: "NOT_FOUND" | "FORBIDDEN" };
 
+type ShiftForStaffGate = {
+  id: string;
+  weekKey: string;
+  locationId: string;
+  status: string;
+  location: { tzIana: string };
+};
+
+async function staffCanViewThisPublishedShift(actor: AuthedUser, shift: ShiftForStaffGate): Promise<boolean> {
+  if (actor.role !== "STAFF") return false;
+  if (shift.status !== "PUBLISHED") return false;
+  const assigned = await prisma.shiftAssignment.findFirst({
+    where: { shiftId: shift.id, staffUserId: actor.id, status: "ASSIGNED" },
+  });
+  if (!assigned) return false;
+  const weekStartDateLocal = weekStartDateLocalFromWeekKey(
+    normalizeIsoWeekKey(shift.weekKey),
+    shift.location.tzIana,
+  );
+  const weekRow = await prisma.scheduleWeek.findFirst({
+    where: {
+      locationId: shift.locationId,
+      weekStartDateLocal,
+      status: "PUBLISHED",
+    },
+  });
+  return weekRow != null;
+}
+
 export async function listAssignmentsForShift(actor: AuthedUser, shiftId: string): Promise<ListAssignmentsResult> {
-  const shift = await prisma.shift.findUnique({ where: { id: shiftId } });
+  const shift = await prisma.shift.findUnique({
+    where: { id: shiftId },
+    include: { location: true },
+  });
   if (!shift) return { ok: false, reason: "NOT_FOUND" };
-  if (!canManageLocation(actor, shift.locationId)) return { ok: false, reason: "FORBIDDEN" };
+
+  if (actor.role === "STAFF") {
+    const ok = await staffCanViewThisPublishedShift(actor, shift);
+    if (!ok) return { ok: false, reason: "FORBIDDEN" };
+  } else if (!canManageLocation(actor, shift.locationId)) {
+    return { ok: false, reason: "FORBIDDEN" };
+  }
+
   const rows = await prisma.shiftAssignment.findMany({
     where: { shiftId },
     include: { staff: { select: { id: true, name: true, email: true } } },
@@ -353,5 +420,23 @@ export async function listAssignmentsForShift(actor: AuthedUser, shiftId: string
       staffEmail: r.staff.email,
     })),
   };
+}
+
+/** Single shift for dashboard / detail when the viewer is allowed to see it. */
+export async function getShiftForViewer(actor: AuthedUser, shiftId: string): Promise<ShiftDto | null> {
+  const row = await prisma.shift.findUnique({
+    where: { id: shiftId },
+    include: { location: true, _count: { select: { assignments: true } } },
+  });
+  if (!row) return null;
+
+  if (actor.role === "STAFF") {
+    const ok = await staffCanViewThisPublishedShift(actor, row);
+    if (!ok) return null;
+    return ShiftDtoSchema.parse(shiftRecordToDto(row));
+  }
+
+  if (!canManageLocation(actor, row.locationId)) return null;
+  return ShiftDtoSchema.parse(shiftRecordToDto(row, { assignedCount: row._count.assignments }));
 }
 

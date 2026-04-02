@@ -3,6 +3,7 @@ export {
   canModifyShift,
   createShift,
   deleteShift,
+  getShiftForViewer,
   listAssignmentsForShift,
   listPublishedShiftsForStaff,
   listShiftsByLocationWeek,

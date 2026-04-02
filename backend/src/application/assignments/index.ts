@@ -1,1 +1,7 @@
-export { previewAssignment, commitAssignment, removeAssignment } from "./assignment.service.js";
+export {
+  previewAssignment,
+  commitAssignment,
+  removeAssignment,
+  listSwapCandidatesForAssignedStaff,
+  type SwapPairCandidate,
+} from "./assignment.service.js";

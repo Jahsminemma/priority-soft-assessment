@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EMERGENCY_OVERRIDE_MIN_LEN } from "../emergency.js";
 
 export const ConstraintViolationCodeSchema = z.enum([
   "DOUBLE_BOOK",
@@ -49,9 +50,17 @@ export const ConstraintViolationSchema = z.object({
 
 export type ConstraintViolation = z.infer<typeof ConstraintViolationSchema>;
 
+const emergencyOverrideField = z
+  .string()
+  .trim()
+  .min(EMERGENCY_OVERRIDE_MIN_LEN)
+  .max(2000)
+  .optional();
+
 export const AssignmentPreviewRequestSchema = z.object({
   shiftId: z.string().uuid(),
   staffUserId: z.string().uuid(),
+  emergencyOverrideReason: emergencyOverrideField,
 });
 
 export type AssignmentPreviewRequest = z.infer<typeof AssignmentPreviewRequestSchema>;
@@ -84,6 +93,7 @@ export const AssignmentCommitRequestSchema = z.object({
   staffUserId: z.string().uuid(),
   idempotencyKey: z.string().min(8).max(128),
   seventhDayOverrideReason: z.string().optional(),
+  emergencyOverrideReason: emergencyOverrideField,
 });
 
 export type AssignmentCommitRequest = z.infer<typeof AssignmentCommitRequestSchema>;

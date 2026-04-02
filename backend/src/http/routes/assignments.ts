@@ -48,7 +48,9 @@ assignmentsRouter.post(
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const out = await previewAssignment(parsed.data.shiftId, parsed.data.staffUserId, user);
+    const out = await previewAssignment(parsed.data.shiftId, parsed.data.staffUserId, user, {
+      emergencyOverrideReason: parsed.data.emergencyOverrideReason,
+    });
     res.json(out);
   },
 );
@@ -80,6 +82,7 @@ assignmentsRouter.post(
       parsed.data.idempotencyKey,
       parsed.data.seventhDayOverrideReason,
       actor,
+      { emergencyOverrideReason: parsed.data.emergencyOverrideReason },
     );
     res.json(out);
   },
@@ -100,7 +103,9 @@ assignmentsRouter.delete(
       res.status(400).json({ error: "Missing assignment id" });
       return;
     }
-    const out = await removeAssignment(assignmentId, actor);
+    const emergencyOverrideReason =
+      typeof req.query["emergencyOverrideReason"] === "string" ? req.query["emergencyOverrideReason"] : undefined;
+    const out = await removeAssignment(assignmentId, actor, { emergencyOverrideReason });
     if (!out.ok) {
       if (out.reason === "NOT_FOUND") {
         res.status(404).json({ error: "Assignment not found" });
@@ -109,7 +114,7 @@ assignmentsRouter.delete(
       if (out.reason === "PAST_CUTOFF") {
         res.status(403).json({
           error:
-            "This shift is on a published schedule and the edit window has closed. Unpublish the week or ask an administrator.",
+            "This schedule is locked within the edit cutoff before this shift. For urgent changes, pass emergencyOverrideReason as a query parameter (min. 10 characters), use Notifications (coverage actions), or ask an administrator.",
         });
         return;
       }
