@@ -3,7 +3,9 @@ import {
   IconAvailability,
   IconBell,
   IconCalendar,
+  IconCalendarMark,
   IconChart,
+  IconClipboard,
   IconClock,
   IconGrid,
   IconSettings,
@@ -15,6 +17,8 @@ export type PrimaryNavListProps = {
   iconWrapClassName: string;
   onNavigate?: () => void;
   canManage: boolean;
+  /** Global audit logs / export — admins only (managers use shift History in the schedule). */
+  isAdmin: boolean;
   isStaff: boolean;
   unreadNotificationsCount?: number;
 };
@@ -27,6 +31,7 @@ export function PrimaryNavList({
   iconWrapClassName,
   onNavigate,
   canManage,
+  isAdmin,
   isStaff,
   unreadNotificationsCount = 0,
 }: PrimaryNavListProps): React.ReactElement {
@@ -57,12 +62,26 @@ export function PrimaryNavList({
             </span>
             <span>Schedule & shifts</span>
           </NavLink>
+          <NavLink to="/manage/shifts" onClick={onNavigate} className={linkClass}>
+            <span className={iw}>
+              <IconCalendarMark />
+            </span>
+            <span>Manage shifts</span>
+          </NavLink>
           <NavLink to="/analytics" onClick={onNavigate} className={linkClass}>
             <span className={iw}>
               <IconChart />
             </span>
             <span>Schedule analytics</span>
           </NavLink>
+          {isAdmin ? (
+            <NavLink to="/admin/audit" onClick={onNavigate} className={linkClass}>
+              <span className={iw}>
+                <IconClipboard />
+              </span>
+              <span>Audit trail</span>
+            </NavLink>
+          ) : null}
         </>
       ) : null}
       {isStaff ? (
@@ -85,7 +104,7 @@ export function PrimaryNavList({
         <span className={iw}>
           <IconClock />
         </span>
-        <span>Clock & on-duty</span>
+        <span>{isStaff ? "Work history" : "Clock & on-duty"}</span>
       </NavLink>
       <NavLink to="/notifications" onClick={onNavigate} className={linkClass}>
         <span className={`${iw}${unreadNotificationsCount > 0 ? " nav-rail__icon-wrap--with-badge" : ""}`}>

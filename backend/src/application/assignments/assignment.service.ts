@@ -424,6 +424,7 @@ export async function commitAssignment(
         emitAssignmentConflict(loc.locationId, {
           shiftId,
           message: "Assignment conflict — staff may already be assigned to this shift.",
+          rejectedUserId: actor.id,
         });
       }
       return {

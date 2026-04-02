@@ -1,2 +1,10 @@
-export { clockIn, clockOut, listOnDutyForLocation } from "./clock.service.js";
-export type { OnDutyRow } from "./clock.service.js";
+export {
+  approveClockInCode,
+  clockIn,
+  clockOut,
+  listMyClockSessions,
+  listOnDutyForLocation,
+  previewClockInCode,
+  requestClockInCode,
+} from "./clock.service.js";
+export type { ClockCodePreviewResult, ClockSessionHistoryRow, OnDutyRow } from "./clock.service.js";

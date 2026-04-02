@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { MobileNavDrawer } from "../components/MobileNavDrawer.js";
 import { IconSignOut } from "../components/NavIcons.js";
@@ -6,6 +6,10 @@ import { PrimaryNavList } from "../components/PrimaryNavList.js";
 import { useAuth } from "../context/AuthContext.js";
 import { useSocketSync } from "../hooks/useSocketSync.js";
 import { roleLabel, userInitial } from "../utils/navUser.js";
+import {
+  ASSIGNMENT_CONFLICT_EVENT,
+  type AssignmentConflictDetail,
+} from "../utils/realtimeEvents.js";
 import { useQuery } from "@tanstack/react-query";
 import { fetchNotifications } from "../api.js";
 
@@ -33,16 +37,41 @@ function IconBellHeader(): React.ReactElement {
   );
 }
 
+const ASSIGNMENT_CONFLICT_TOAST_COPY =
+  "Another schedule change finished at the same time (for example, two people assigning the same slot). Your view has been refreshed.";
+
 export function AppShell(): React.ReactElement {
   const { user, logout, token } = useAuth();
   useSocketSync();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [assignmentConflictOpen, setAssignmentConflictOpen] = useState(false);
+  const conflictToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
 
+  useEffect(() => {
+    const onConflict = (e: Event): void => {
+      const ce = e as CustomEvent<AssignmentConflictDetail>;
+      if (!ce.detail?.shiftId) return;
+      if (user?.id && ce.detail.rejectedUserId === user.id) return;
+      setAssignmentConflictOpen(true);
+      if (conflictToastTimerRef.current) clearTimeout(conflictToastTimerRef.current);
+      conflictToastTimerRef.current = setTimeout(() => {
+        setAssignmentConflictOpen(false);
+        conflictToastTimerRef.current = null;
+      }, 12_000);
+    };
+    window.addEventListener(ASSIGNMENT_CONFLICT_EVENT, onConflict);
+    return () => {
+      window.removeEventListener(ASSIGNMENT_CONFLICT_EVENT, onConflict);
+      if (conflictToastTimerRef.current) clearTimeout(conflictToastTimerRef.current);
+    };
+  }, [user?.id]);
+
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
+  const isAdmin = user?.role === "ADMIN";
   const isStaff = user?.role === "STAFF";
   const unreadCount = useQuery({
     queryKey: ["notifications", token],
@@ -78,6 +107,7 @@ export function AppShell(): React.ReactElement {
               linkClass={sidebarLinkClass}
               iconWrapClassName="nav-rail__icon-wrap"
               canManage={canManage}
+              isAdmin={isAdmin}
               isStaff={isStaff}
               unreadNotificationsCount={unreadNotificationsCount}
             />
@@ -152,10 +182,39 @@ export function AppShell(): React.ReactElement {
         userName={user?.name}
         userRole={user?.role}
         canManage={canManage}
+        isAdmin={isAdmin}
         isStaff={isStaff}
         onSignOut={signOut}
         unreadNotificationsCount={unreadNotificationsCount}
       />
+
+      {assignmentConflictOpen ? (
+        <div
+          className="app-toast app-toast--warn"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <div className="app-toast__body">
+            <strong className="app-toast__title">Schedule updated</strong>
+            <p className="app-toast__text">{ASSIGNMENT_CONFLICT_TOAST_COPY}</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm app-toast__close"
+            onClick={() => {
+              if (conflictToastTimerRef.current) {
+                clearTimeout(conflictToastTimerRef.current);
+                conflictToastTimerRef.current = null;
+              }
+              setAssignmentConflictOpen(false);
+            }}
+            aria-label="Dismiss"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

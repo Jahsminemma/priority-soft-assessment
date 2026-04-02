@@ -19,6 +19,7 @@ import {
   RegisterVerifyResponseSchema,
   ReplaceAvailabilityRulesSchema,
   ShiftDtoSchema,
+  ManageShiftRowSchema,
   CreateShiftRequestSchema,
   UpdateShiftRequestSchema,
   type AvailabilityExceptionBatchInput,
@@ -30,6 +31,7 @@ import {
   type RegisterVerifyResponse,
   type ReplaceAvailabilityRules,
   type ShiftDto,
+  type ManageShiftRow,
   type LocationSummary,
   type NotificationDto,
   type CreateCoverageRequest,
@@ -41,6 +43,15 @@ import {
   WeekScheduleStateResponseSchema,
   EMERGENCY_OVERRIDE_MIN_LEN,
   type OvertimeCostWeekResponse,
+  ClockSessionHistoryRowSchema,
+  ClockInCodeResponseSchema,
+  ClockCodePreviewResponseSchema,
+  ClockApproveCodeResponseSchema,
+  type ClockSessionHistoryRow,
+  type ClockCodePreviewResponse,
+  AuditLogRowDtoSchema,
+  type AuditLogRowDto,
+  type AuditListQuery,
 } from "@shiftsync/shared";
 
 const base = import.meta.env.VITE_API_URL ?? "";
@@ -193,6 +204,25 @@ export async function fetchSkills(token: string): Promise<Array<{ id: string; na
   if (!res.ok) throw new Error("Skills failed");
   const data: unknown = await res.json();
   return z.array(SkillOptionSchema).parse(data);
+}
+
+export async function fetchShiftsManage(
+  token: string,
+  q: { fromWeek: string; toWeek: string; locationId?: string },
+  signal?: AbortSignal,
+): Promise<ManageShiftRow[]> {
+  const fw = normalizeIsoWeekKey(q.fromWeek);
+  const tw = normalizeIsoWeekKey(q.toWeek);
+  const params = new URLSearchParams({ fromWeek: fw, toWeek: tw });
+  if (q.locationId) params.set("locationId", q.locationId);
+  const res = await fetch(`${base}/api/shifts/manage?${params.toString()}`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` },
+    ...(signal !== undefined ? { signal } : {}),
+  });
+  if (!res.ok) throw new Error("Shifts list failed");
+  const data: unknown = await res.json();
+  return z.array(ManageShiftRowSchema).parse(data);
 }
 
 export async function fetchShifts(
@@ -631,6 +661,123 @@ export async function clockOut(token: string): Promise<{ sessionId: string }> {
     );
   }
   return (await res.json()) as { sessionId: string };
+}
+
+export async function fetchMyClockSessions(token: string): Promise<ClockSessionHistoryRow[]> {
+  const res = await fetch(`${base}/api/clock/my-sessions`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Work history failed");
+  const data: unknown = await res.json();
+  return z.array(ClockSessionHistoryRowSchema).parse(data);
+}
+
+export async function requestClockInCode(
+  token: string,
+  shiftId: string,
+): Promise<{ code: string; expiresAtUtc: string }> {
+  const res = await fetch(`${base}/api/clock/request-code`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ shiftId }),
+  });
+  if (!res.ok) {
+    const err: unknown = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof err === "object" && err !== null && "error" in err
+        ? String((err as { error: unknown }).error)
+        : "Could not create clock-in code",
+    );
+  }
+  const data: unknown = await res.json();
+  return ClockInCodeResponseSchema.parse(data);
+}
+
+export async function previewClockInCode(token: string, code: string): Promise<ClockCodePreviewResponse> {
+  const res = await fetch(`${base}/api/clock/preview-code`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const err: unknown = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof err === "object" && err !== null && "error" in err
+        ? String((err as { error: unknown }).error)
+        : "Look up failed",
+    );
+  }
+  const data: unknown = await res.json();
+  return ClockCodePreviewResponseSchema.parse(data);
+}
+
+export async function approveClockInCode(token: string, code: string): Promise<{ sessionId: string }> {
+  const res = await fetch(`${base}/api/clock/approve-code`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const err: unknown = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof err === "object" && err !== null && "error" in err
+        ? String((err as { error: unknown }).error)
+        : "Approval failed",
+    );
+  }
+  const data: unknown = await res.json();
+  return ClockApproveCodeResponseSchema.parse(data);
+}
+
+export async function fetchAuditList(token: string, query: AuditListQuery): Promise<AuditLogRowDto[]> {
+  const q = new URLSearchParams();
+  if (query.from) q.set("from", query.from);
+  if (query.to) q.set("to", query.to);
+  if (query.locationId) q.set("locationId", query.locationId);
+  const res = await fetch(`${base}/api/audit/list?${q.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load audit logs");
+  const data: unknown = await res.json();
+  return z.array(AuditLogRowDtoSchema).parse(data);
+}
+
+export async function fetchAuditForShift(token: string, shiftId: string): Promise<AuditLogRowDto[]> {
+  const res = await fetch(`${base}/api/audit/shifts/${encodeURIComponent(shiftId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) {
+    throw new Error("SHIFT_AUDIT_NOT_FOUND");
+  }
+  if (!res.ok) throw new Error("Failed to load shift audit history");
+  const data: unknown = await res.json();
+  return z.array(AuditLogRowDtoSchema).parse(data);
+}
+
+export async function fetchAuditExport(
+  token: string,
+  fromIso: string,
+  toIso: string,
+  locationId?: string,
+): Promise<AuditLogRowDto[]> {
+  const q = new URLSearchParams({ from: fromIso, to: toIso });
+  if (locationId) q.set("locationId", locationId);
+  const res = await fetch(`${base}/api/audit/export?${q.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 403) throw new Error("Forbidden");
+  if (!res.ok) throw new Error("Export failed");
+  const data: unknown = await res.json();
+  return z.array(AuditLogRowDtoSchema).parse(data);
 }
 
 const OnDutyRowSchema = z.object({

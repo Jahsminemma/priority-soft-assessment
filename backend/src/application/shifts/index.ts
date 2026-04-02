@@ -7,5 +7,6 @@ export {
   listAssignmentsForShift,
   listPublishedShiftsForStaff,
   listShiftsByLocationWeek,
+  listShiftsForManage,
   updateShift,
 } from "./shift.service.js";

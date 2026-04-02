@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { io } from "socket.io-client";
 import { useAuth } from "../context/AuthContext.js";
 import { fetchLocations } from "../api.js";
+import { dispatchAssignmentConflict, type AssignmentConflictDetail } from "../utils/realtimeEvents.js";
 
 /**
  * Subscribes to Socket.IO and invalidates React Query caches when server events fire.
@@ -55,7 +56,19 @@ export function useSocketSync(): void {
     socket.on("schedule.weekUpdated", invShiftsAndWeekState);
     socket.on("shift.updated", invShiftsAndWeekState);
     socket.on("assignment.changed", invShiftsAndWeekState);
-    socket.on("conflict.assignmentRejected", invShifts);
+    socket.on("conflict.assignmentRejected", (payload: unknown) => {
+      invShifts();
+      void queryClient.invalidateQueries({ queryKey: ["shiftAssignments"] });
+      void queryClient.refetchQueries({ queryKey: ["shiftAssignments"], type: "active" });
+      const parsed = payload as Partial<AssignmentConflictDetail> | undefined;
+      if (parsed && typeof parsed.shiftId === "string" && typeof parsed.message === "string") {
+        dispatchAssignmentConflict({
+          shiftId: parsed.shiftId,
+          message: parsed.message,
+          ...(typeof parsed.rejectedUserId === "string" ? { rejectedUserId: parsed.rejectedUserId } : {}),
+        });
+      }
+    });
     socket.on("coverage.requestUpdated", invCoverage);
     socket.on("notification.created", () => {
       void queryClient.invalidateQueries({ queryKey: ["notifications"] });

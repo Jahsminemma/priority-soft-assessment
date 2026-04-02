@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import { EMERGENCY_OVERRIDE_MIN_LEN, type LocationSummary, type ShiftDto } from "@shiftsync/shared";
 import { ShiftTimeRangeFields } from "./ShiftTimeRangeFields.js";
 import { ConstraintAlert } from "./ConstraintAlert.js";
+import { ShiftHistoryTimeline } from "./ShiftHistoryTimeline.js";
 import { maxYmd } from "../utils/weekKey.js";
 
 type SkillOption = { id: string; name: string };
@@ -69,6 +70,7 @@ export function EditShiftDialog({
   deleteError = null,
 }: Props): ReactElement | null {
   const titleId = useId();
+  const [activeTab, setActiveTab] = useState<"edit" | "history">("edit");
 
   const clampYmd = (v: string): string => (v < minShiftDateYmd ? minShiftDateYmd : v);
 
@@ -88,6 +90,10 @@ export function EditShiftDialog({
   const [startTime, setStartTime] = useState("09:00");
   const [endDate, setEndDate] = useState(initialEndDate);
   const [endTime, setEndTime] = useState("17:00");
+
+  useEffect(() => {
+    if (!open) setActiveTab("edit");
+  }, [open]);
 
   useEffect(() => {
     if (!open || !shift) return;
@@ -116,12 +122,14 @@ export function EditShiftDialog({
         aria-labelledby={titleId}
       >
         <div className="schedule-modal__head">
-          <h2 id={titleId} className="schedule-modal__title">
-            Edit shift
-          </h2>
-          <p className="muted small schedule-modal__subtitle">
-            {location?.name ?? "Location"} · {skillLabel} · times in {locationTz}
-          </p>
+          <div>
+            <h2 id={titleId} className="schedule-modal__title">
+              Edit shift
+            </h2>
+            <p className="muted small schedule-modal__subtitle">
+              {location?.name ?? "Location"} · {skillLabel} · times in {locationTz}
+            </p>
+          </div>
           <button
             type="button"
             className="btn btn--ghost schedule-modal__close"
@@ -139,8 +147,32 @@ export function EditShiftDialog({
           </button>
         </div>
 
+        <div className="edit-shift-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "edit"}
+            className={`edit-shift-tabs__tab${activeTab === "edit" ? " edit-shift-tabs__tab--active" : ""}`}
+            onClick={() => setActiveTab("edit")}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "history"}
+            className={`edit-shift-tabs__tab${activeTab === "history" ? " edit-shift-tabs__tab--active" : ""}`}
+            onClick={() => setActiveTab("history")}
+          >
+            History
+          </button>
+        </div>
+
         <div className="schedule-modal__scroll">
-          <div className="stack">
+          {activeTab === "history" ? (
+            <ShiftHistoryTimeline shiftId={shift.id} locationTz={locationTz} />
+          ) : null}
+          <div className="stack" style={activeTab === "history" ? { display: "none" } : undefined}>
           <label className="field">
             <span className="field__label">Headcount</span>
             <input

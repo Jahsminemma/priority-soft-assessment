@@ -77,6 +77,28 @@ export const UpdateShiftRequestSchema = z
 
 export type UpdateShiftRequest = z.infer<typeof UpdateShiftRequestSchema>;
 
+/** Manager/admin: list shifts across weeks and locations for the Manage Shifts page. */
+export const ListShiftsManageQuerySchema = z.object({
+  fromWeek: z.string().min(1).transform(normalizeIsoWeekKey),
+  toWeek: z.string().min(1).transform(normalizeIsoWeekKey),
+  locationId: z.string().uuid().optional(),
+});
+
+export type ListShiftsManageQuery = z.infer<typeof ListShiftsManageQuerySchema>;
+
+export const ManageShiftAssignmentSchema = z.object({
+  assignmentId: z.string().uuid(),
+  staffUserId: z.string().uuid(),
+  staffName: z.string(),
+});
+
+export const ManageShiftRowSchema = ShiftDtoSchema.extend({
+  locationName: z.string(),
+  assignments: z.array(ManageShiftAssignmentSchema),
+});
+
+export type ManageShiftRow = z.infer<typeof ManageShiftRowSchema>;
+
 /** Options for gated operations on published shifts (per-shift cutoff). */
 export type ModifyShiftOptions = {
   emergencyOverrideReason?: string | undefined;
