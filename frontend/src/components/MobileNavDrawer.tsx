@@ -11,7 +11,6 @@ type MobileNavDrawerProps = {
   userRole: string | undefined;
   canManage: boolean;
   isStaff: boolean;
-  isAdmin: boolean;
   onSignOut: () => void;
   unreadNotificationsCount?: number;
 };
@@ -27,7 +26,6 @@ export function MobileNavDrawer({
   userRole,
   canManage,
   isStaff,
-  isAdmin,
   onSignOut,
   unreadNotificationsCount = 0,
 }: MobileNavDrawerProps): React.ReactElement {
@@ -89,7 +87,6 @@ export function MobileNavDrawer({
             onNavigate={onClose}
             canManage={canManage}
             isStaff={isStaff}
-            isAdmin={isAdmin}
             unreadNotificationsCount={unreadNotificationsCount}
           />
         </nav>

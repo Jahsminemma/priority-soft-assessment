@@ -17,7 +17,7 @@ import {
   type AssignmentPreviewResponse,
   type ShiftDto,
 } from "@shiftsync/shared";
-import type { ShiftAssignmentRow } from "./ShiftStaffingTable.js";
+import type { ShiftAssignmentRow } from "../types/shiftAssignment.js";
 
 type Props = {
   open: boolean;
@@ -39,6 +39,14 @@ type Props = {
   /** From GET /api/schedule/week-state — used for per-shift cutoff UI. */
   scheduleCutoff?: { cutoffHours: number; weekRowStatus: "NONE" | "DRAFT" | "PUBLISHED" } | null;
 };
+
+function formatUsd(n: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+}
+
+function fmtHoursFromMin(m: number): string {
+  return `${(m / 60).toFixed(1)}h`;
+}
 
 function shiftPastCutoff(
   shift: ShiftDto,
@@ -178,13 +186,20 @@ export function ScheduleCellAssignDialog({
     Boolean(staffUserId) &&
     eligibleShifts.some((s) => s.id === shiftId);
 
-  /** Do not put raw `emergencyOverrideReason` in the query key — it refetches every keystroke and glitches the UI. */
+  /** Do not put raw `emergencyOverrideReason` / `seventhReason` in the query key — refetches every keystroke. */
   const debouncedEmergencyForPreview = useDebouncedValue(emergencyOverrideReason, 600);
+  const debouncedSeventhForPreview = useDebouncedValue(seventhReason, 600);
 
   const previewQuery = useQuery({
-    queryKey: ["assignmentPreview", token, shiftId, staffUserId, debouncedEmergencyForPreview] as const,
+    queryKey: ["assignmentPreview", token, shiftId, staffUserId, debouncedEmergencyForPreview, debouncedSeventhForPreview] as const,
     queryFn: async (): Promise<AssignmentPreviewResponse> => {
-      const raw = await previewAssignment(token, shiftId, staffUserId, debouncedEmergencyForPreview);
+      const raw = await previewAssignment(
+        token,
+        shiftId,
+        staffUserId,
+        debouncedEmergencyForPreview,
+        debouncedSeventhForPreview,
+      );
       return AssignmentPreviewResponseSchema.parse(raw);
     },
     enabled: previewEnabled,
@@ -193,6 +208,13 @@ export function ScheduleCellAssignDialog({
   });
 
   const preview = previewQuery.data ?? null;
+  /** Keep override field visible for the whole flow: blocked → typing → preview allowed with override warning. */
+  const showSeventhDayReasonField = useMemo(() => {
+    const hard = preview?.hardViolations.some((v) => v.code === "WEEKLY_SEVENTH_DAY") ?? false;
+    const overridden = preview?.warnings.some((v) => v.code === "WEEKLY_SEVENTH_DAY_OVERRIDE") ?? false;
+    const hasDraft = seventhReason.trim().length > 0;
+    return hard || overridden || hasDraft;
+  }, [preview, seventhReason]);
   /** Only show full-page “checking” when there is no data yet — not on background refetches (avoids layout jump). */
   const previewLoadingInitial = previewEnabled && previewQuery.isPending && !previewQuery.isPlaceholderData;
 
@@ -200,6 +222,7 @@ export function ScheduleCellAssignDialog({
     void queryClient.invalidateQueries({ queryKey: ["shifts"] });
     void queryClient.invalidateQueries({ queryKey: ["shiftAssignments"] });
     void queryClient.invalidateQueries({ queryKey: ["assignmentPreview"] });
+    void queryClient.invalidateQueries({ queryKey: ["analytics", "overtimeCost"] });
   };
 
   const commitMut = useMutation({
@@ -245,12 +268,17 @@ export function ScheduleCellAssignDialog({
     shiftPastCutoff(selectedShift, scheduleCutoff ?? null) &&
     emergencyOverrideReason.trim().length < EMERGENCY_OVERRIDE_MIN_LEN;
 
+  /** Wait for debounced 7th-day reason to reach the preview query before confirming. */
+  const seventhReasonDebouncePending =
+    showSeventhDayReasonField && seventhReason.trim() !== debouncedSeventhForPreview.trim();
+
   const canConfirm =
     Boolean(preview?.ok) &&
     Boolean(shiftId) &&
     !commitMut.isPending &&
     !previewQuery.isError &&
-    !commitNeedsEmergency;
+    !commitNeedsEmergency &&
+    !seventhReasonDebouncePending;
 
   if (!open) return null;
 
@@ -380,6 +408,7 @@ export function ScheduleCellAssignDialog({
                 value={shiftId}
                 onChange={(e) => {
                   setShiftId(e.target.value);
+                  setSeventhReason("");
                   setCommitResult(null);
                 }}
               >
@@ -390,15 +419,6 @@ export function ScheduleCellAssignDialog({
                   </option>
                 ))}
               </select>
-            </label>
-
-            <label className="field">
-              <span className="field__label">7th day in a row — reason (optional)</span>
-              <input
-                value={seventhReason}
-                onChange={(e) => setSeventhReason(e.target.value)}
-                placeholder="Only if the system asks for a manager note"
-              />
             </label>
 
             {previewLoadingInitial ? (
@@ -437,8 +457,53 @@ export function ScheduleCellAssignDialog({
                     ? "This assignment is allowed."
                     : "This assignment can’t go through yet—see what’s blocking it below."}
                 </div>
+                {preview.laborImpact ? (
+                  <div className="schedule-assign-labor-impact">
+                    <p className="schedule-assign-labor-impact__title">If you confirm (this site, this week)</p>
+                    <ul className="schedule-assign-labor-impact__grid">
+                      <li>
+                        <span className="muted">Rate used</span> · {formatUsd(preview.laborImpact.hourlyRateUsd)}/h
+                      </li>
+                      <li>
+                        <span className="muted">Week scheduled</span> · {fmtHoursFromMin(preview.laborImpact.weeklyBaselineMinutes)} →{" "}
+                        {fmtHoursFromMin(preview.laborImpact.weeklyAfterMinutes)}
+                      </li>
+                      <li>
+                        <span className="muted">This shift</span> · {fmtHoursFromMin(preview.laborImpact.hypotheticalShiftStraightMinutes)} straight
+                        {preview.laborImpact.hypotheticalShiftOtMinutes > 0 ? (
+                          <>
+                            , {fmtHoursFromMin(preview.laborImpact.hypotheticalShiftOtMinutes)} OT
+                          </>
+                        ) : null}
+                      </li>
+                      <li>
+                        <span className="muted">Week labor</span> · {formatUsd(preview.laborImpact.baselineLaborUsd)} →{" "}
+                        {formatUsd(preview.laborImpact.projectedLaborUsd)}
+                      </li>
+                      <li>
+                        <span className="muted">Δ cost</span> ·{" "}
+                        <strong>{formatUsd(preview.laborImpact.deltaLaborUsd)}</strong>
+                      </li>
+                    </ul>
+                  </div>
+                ) : null}
                 <ConstraintViolationCards violations={preview.hardViolations} heading="Blocking issues" />
                 <ConstraintViolationCards violations={preview.warnings} heading="Warnings" />
+                {showSeventhDayReasonField ? (
+                  <label className="field schedule-assign-seventh-override">
+                    <span className="field__label">7th consecutive work day — documented reason (required)</span>
+                    <textarea
+                      value={seventhReason}
+                      onChange={(e) => setSeventhReason(e.target.value)}
+                      rows={3}
+                      placeholder="Explain why this 7th day in a row is approved (stored with the assignment)."
+                    />
+                    <span className="muted small">
+                      Warnings above stay visible for policy context. Enter a note to clear the block; the same text is
+                      saved on commit and appears in the assignment audit record for admins.
+                    </span>
+                  </label>
+                ) : null}
                 {!preview.ok ? (
                   <AssignmentAlternativesHint
                     alternatives={preview.alternatives}

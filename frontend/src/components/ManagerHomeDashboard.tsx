@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { DateTime } from "luxon";
+import { useQuery } from "@tanstack/react-query";
 import { normalizeIsoWeekKey } from "@shiftsync/shared";
+import { fetchLocations, fetchOvertimeCostWeekReport } from "../api.js";
 import { ManagerCoverageQueueSidebar } from "./ManagerCoverageQueueSidebar.js";
 import { formatWeekRangeLabel, initialWeekKeyFromToday } from "../utils/weekKey.js";
 
@@ -27,19 +29,6 @@ function IconCalendar(): React.ReactElement {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
-
-function IconUsers(): React.ReactElement {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
-      <path
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"
       />
     </svg>
   );
@@ -93,9 +82,26 @@ function IconSettings(): React.ReactElement {
   );
 }
 
+const usd = (n: number): string =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+
 export function ManagerHomeDashboard({ token, userName, role }: Props): React.ReactElement {
   const weekKey = useMemo(() => normalizeIsoWeekKey(initialWeekKeyFromToday()), []);
   const weekLabel = useMemo(() => formatWeekRangeLabel(weekKey), [weekKey]);
+
+  const locationsQuery = useQuery({
+    queryKey: ["locations", token],
+    queryFn: () => fetchLocations(token),
+    enabled: Boolean(token),
+  });
+  const primaryLocationId = locationsQuery.data?.[0]?.id;
+  const overtimeCostQuery = useQuery({
+    queryKey: ["analytics", "overtimeCost", token, primaryLocationId, weekKey],
+    queryFn: () => fetchOvertimeCostWeekReport(token, primaryLocationId!, weekKey),
+    enabled: Boolean(token && primaryLocationId),
+    staleTime: 60_000,
+  });
+  const primaryLocationName = locationsQuery.data?.find((l) => l.id === primaryLocationId)?.name;
 
   const greeting = useMemo(() => {
     const h = DateTime.now().hour;
@@ -122,6 +128,27 @@ export function ManagerHomeDashboard({ token, userName, role }: Props): React.Re
             </p>
           </header>
 
+          {overtimeCostQuery.data != null ? (
+            <div className="manager-dash__ot-card" aria-live="polite">
+              <p className="manager-dash__ot-card-kicker">Projected overtime payroll</p>
+              <p className="manager-dash__ot-card-value">{usd(overtimeCostQuery.data.totalOtUsd)}</p>
+              <p className="manager-dash__ot-card-meta">
+                {weekLabel}
+                {primaryLocationName ? ` · ${primaryLocationName}` : ""} · 40h straight cap, 1.5× OT (FIFO by shift start)
+              </p>
+              <p className="manager-dash__ot-card-meta">
+                Week labor (straight + OT): {usd(overtimeCostQuery.data.totalLaborUsd)}
+              </p>
+              <Link to="/analytics" className="manager-dash__ot-card-link">
+                View hours and fairness in Analytics →
+              </Link>
+            </div>
+          ) : overtimeCostQuery.isLoading && primaryLocationId ? (
+            <p className="muted small" style={{ marginTop: "0.75rem" }}>
+              Loading projected labor…
+            </p>
+          ) : null}
+
           <section className="manager-section" aria-labelledby="manager-actions-heading">
             <div className="manager-section__head">
               <h2 id="manager-actions-heading" className="manager-section__title">
@@ -137,16 +164,6 @@ export function ManagerHomeDashboard({ token, userName, role }: Props): React.Re
                 <span className="manager-action-tile__body">
                   <span className="manager-action-tile__label">Schedule</span>
                   <span className="manager-action-tile__desc">Build shifts, assign staff, publish weeks</span>
-                </span>
-                <IconChevron />
-              </Link>
-              <Link to="/assignments" className="manager-action-tile">
-                <span className="manager-action-tile__icon" aria-hidden>
-                  <IconUsers />
-                </span>
-                <span className="manager-action-tile__body">
-                  <span className="manager-action-tile__label">Assignments</span>
-                  <span className="manager-action-tile__desc">Who is working each shift this week</span>
                 </span>
                 <IconChevron />
               </Link>

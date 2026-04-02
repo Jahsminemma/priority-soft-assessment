@@ -1,9 +1,32 @@
+import { DateTime } from "luxon";
 import { isoWeekKeyDbVariants } from "@shiftsync/shared";
+import {
+  fifoStraightOtPerInterval,
+  resolveHourlyRateUsd,
+  roundUsd,
+  type FifoInterval,
+} from "../../domain/scheduling/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { canManageLocation, type AuthedUser } from "../../security/index.js";
 
 function shiftDurationMinutes(start: Date, end: Date): number {
   return (end.getTime() - start.getTime()) / 60_000;
+}
+
+/**
+ * "Desirable" / premium shifts: explicitly marked premium, or Fri/Sat evening start (local site time, 17:00+).
+ */
+export function countsAsPremiumDesirableShift(shift: {
+  isPremium: boolean;
+  startAtUtc: Date;
+  location: { tzIana: string };
+}): boolean {
+  if (shift.isPremium) return true;
+  const dt = DateTime.fromJSDate(shift.startAtUtc, { zone: "utc" }).setZone(shift.location.tzIana);
+  const wd = dt.weekday;
+  const isFriOrSat = wd === 5 || wd === 6;
+  const evening = dt.hour >= 17;
+  return isFriOrSat && evening;
 }
 
 async function manageableLocationIds(actor: AuthedUser): Promise<string[]> {
@@ -64,7 +87,7 @@ export async function fairnessReport(
         shift: { locationId: { in: locationIds }, weekKey: { in: weekKeys } },
       },
       include: {
-        shift: true,
+        shift: { include: { location: { select: { tzIana: true } } } },
         staff: { select: { id: true, name: true, desiredHoursWeekly: true } },
       },
     }),
@@ -105,7 +128,7 @@ export async function fairnessReport(
       byStaff.set(a.staffUserId, cur);
     }
     cur.minutes += m;
-    if (a.shift.isPremium) cur.premium += 1;
+    if (countsAsPremiumDesirableShift(a.shift)) cur.premium += 1;
     cur.shiftIds.add(a.shiftId);
   }
 
@@ -176,4 +199,169 @@ export async function overtimeWeekReport(
         warnings,
       };
     });
+}
+
+export type OvertimeCostAssignmentRow = {
+  assignmentId: string;
+  shiftId: string;
+  staffUserId: string;
+  staffName: string;
+  straightMinutes: number;
+  otMinutes: number;
+  straightUsd: number;
+  otUsd: number;
+  hourlyRateUsd: number;
+};
+
+export type OvertimeCostStaffRow = {
+  staffUserId: string;
+  name: string;
+  weeklyMinutes: number;
+  weeklyStraightMinutes: number;
+  weeklyOtMinutes: number;
+  straightUsd: number;
+  otUsd: number;
+  totalLaborUsd: number;
+};
+
+export type OvertimeCostWeekPayload = {
+  weekKey: string;
+  totalStraightUsd: number;
+  totalOtUsd: number;
+  totalLaborUsd: number;
+  staff: OvertimeCostStaffRow[];
+  assignments: OvertimeCostAssignmentRow[];
+};
+
+export async function overtimeCostWeekReport(
+  actor: AuthedUser,
+  locationId: string | "all",
+  weekKey: string,
+): Promise<OvertimeCostWeekPayload | null> {
+  const locationIds = await resolveLocationFilter(actor, locationId);
+  if (locationIds === null) return null;
+  if (locationIds.length === 0) {
+    return {
+      weekKey,
+      totalStraightUsd: 0,
+      totalOtUsd: 0,
+      totalLaborUsd: 0,
+      staff: [],
+      assignments: [],
+    };
+  }
+
+  const weekKeysOt = isoWeekKeyDbVariants(weekKey);
+  const assignments = await prisma.shiftAssignment.findMany({
+    where: {
+      shift: { locationId: { in: locationIds }, weekKey: { in: weekKeysOt } },
+    },
+    include: {
+      shift: true,
+      staff: { select: { id: true, name: true, hourlyRate: true } },
+    },
+  });
+
+  const locIds = [...new Set(assignments.map((a) => a.shift.locationId))];
+  const locRows =
+    locIds.length > 0
+      ? await prisma.location.findMany({
+          where: { id: { in: locIds } },
+          select: { id: true, defaultHourlyRate: true },
+        })
+      : [];
+  const locDefaultById = new Map(locRows.map((l) => [l.id, l.defaultHourlyRate]));
+
+  const byStaff = new Map<
+    string,
+    {
+      name: string;
+      rows: typeof assignments;
+    }
+  >();
+  for (const a of assignments) {
+    const cur = byStaff.get(a.staffUserId) ?? { name: a.staff.name, rows: [] as typeof assignments };
+    cur.rows.push(a);
+    byStaff.set(a.staffUserId, cur);
+  }
+
+  const assignmentOut: OvertimeCostAssignmentRow[] = [];
+  const staffOut: OvertimeCostStaffRow[] = [];
+  let totalStraightUsd = 0;
+  let totalOtUsd = 0;
+
+  for (const [staffUserId, { name, rows }] of byStaff) {
+    rows.sort((a, b) => {
+      const t = a.shift.startAtUtc.getTime() - b.shift.startAtUtc.getTime();
+      return t !== 0 ? t : a.id.localeCompare(b.id);
+    });
+
+    const intervals: FifoInterval[] = rows.map((a) => ({
+      id: a.id,
+      startMs: a.shift.startAtUtc.getTime(),
+      durationMin: shiftDurationMinutes(a.shift.startAtUtc, a.shift.endAtUtc),
+    }));
+    const splitMap = fifoStraightOtPerInterval(intervals);
+
+    let sStraightMin = 0;
+    let sOtMin = 0;
+    let sStraightUsd = 0;
+    let sOtUsd = 0;
+    let weeklyMin = 0;
+
+    for (const a of rows) {
+      const split = splitMap.get(a.id)!;
+      const locDefault = locDefaultById.get(a.shift.locationId) ?? null;
+      const rate = resolveHourlyRateUsd(a.staff.hourlyRate, locDefault);
+      const straightUsd = roundUsd((split.straightMin / 60) * rate);
+      const otUsd = roundUsd((split.otMin / 60) * rate * 1.5);
+      weeklyMin += split.straightMin + split.otMin;
+      sStraightMin += split.straightMin;
+      sOtMin += split.otMin;
+      sStraightUsd += straightUsd;
+      sOtUsd += otUsd;
+      assignmentOut.push({
+        assignmentId: a.id,
+        shiftId: a.shiftId,
+        staffUserId,
+        staffName: name,
+        straightMinutes: Math.round(split.straightMin),
+        otMinutes: Math.round(split.otMin),
+        straightUsd,
+        otUsd,
+        hourlyRateUsd: rate,
+      });
+    }
+
+    sStraightUsd = roundUsd(sStraightUsd);
+    sOtUsd = roundUsd(sOtUsd);
+    const totalLabor = roundUsd(sStraightUsd + sOtUsd);
+    totalStraightUsd += sStraightUsd;
+    totalOtUsd += sOtUsd;
+    staffOut.push({
+      staffUserId,
+      name,
+      weeklyMinutes: Math.round(weeklyMin),
+      weeklyStraightMinutes: Math.round(sStraightMin),
+      weeklyOtMinutes: Math.round(sOtMin),
+      straightUsd: sStraightUsd,
+      otUsd: sOtUsd,
+      totalLaborUsd: totalLabor,
+    });
+  }
+
+  staffOut.sort((a, b) => a.name.localeCompare(b.name));
+  assignmentOut.sort((a, b) => {
+    const t = a.staffName.localeCompare(b.staffName);
+    return t !== 0 ? t : a.shiftId.localeCompare(b.shiftId);
+  });
+
+  return {
+    weekKey,
+    totalStraightUsd: roundUsd(totalStraightUsd),
+    totalOtUsd: roundUsd(totalOtUsd),
+    totalLaborUsd: roundUsd(totalStraightUsd + totalOtUsd),
+    staff: staffOut,
+    assignments: assignmentOut,
+  };
 }

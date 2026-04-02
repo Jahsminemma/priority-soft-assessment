@@ -39,6 +39,7 @@ export function useSocketSync(): void {
       invShifts();
       void queryClient.invalidateQueries({ queryKey: ["weekScheduleState"] });
       void queryClient.refetchQueries({ queryKey: ["weekScheduleState"], type: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["analytics", "overtimeCost"] });
     };
     const invCoverage = (): void => {
       invShiftsAndWeekState();
@@ -46,6 +47,10 @@ export function useSocketSync(): void {
       void queryClient.refetchQueries({ queryKey: ["swapCandidates"], type: "active" });
       void queryClient.invalidateQueries({ queryKey: ["managerCoverageQueue"] });
       void queryClient.refetchQueries({ queryKey: ["managerCoverageQueue"], type: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["openCallouts"] });
+      void queryClient.refetchQueries({ queryKey: ["openCallouts"], type: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.refetchQueries({ queryKey: ["notifications"], type: "active" });
     };
     socket.on("schedule.weekUpdated", invShiftsAndWeekState);
     socket.on("shift.updated", invShiftsAndWeekState);

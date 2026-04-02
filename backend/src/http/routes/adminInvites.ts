@@ -7,22 +7,99 @@ import { authMiddleware, requireRoles, type AuthedRequest } from "../middleware/
 
 export const adminInvitesRouter = Router();
 
+function mapTeamResponse(
+  managers: Array<{
+    id: string;
+    name: string;
+    email: string;
+    managerLocations: Array<{ location: { id: string; name: string } }>;
+  }>,
+  staff: Array<{
+    id: string;
+    name: string;
+    email: string;
+    desiredHoursWeekly: number | null;
+    staffSkills: Array<{ skill: { id: string; name: string } }>;
+    certifications: Array<{ location: { id: string; name: string } }>;
+  }>,
+): { managers: unknown[]; staff: unknown[] } {
+  return {
+    managers: managers.map((m) => ({
+      id: m.id,
+      name: m.name,
+      email: m.email,
+      locations: m.managerLocations.map((ml) => ({
+        id: ml.location.id,
+        name: ml.location.name,
+      })),
+      skills: [] as { id: string; name: string }[],
+    })),
+    staff: staff.map((s) => ({
+      id: s.id,
+      name: s.name,
+      email: s.email,
+      desiredHoursWeekly: s.desiredHoursWeekly,
+      skills: s.staffSkills.map((ss) => ({ id: ss.skill.id, name: ss.skill.name })),
+      locations: s.certifications.map((c) => ({ id: c.location.id, name: c.location.name })),
+    })),
+  };
+}
+
 adminInvitesRouter.get(
   "/team",
   authMiddleware,
-  requireRoles("ADMIN"),
-  async (_req, res): Promise<void> => {
+  requireRoles("ADMIN", "MANAGER"),
+  async (req: AuthedRequest, res): Promise<void> => {
+    const actor = req.user;
+    if (!actor) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
     try {
+      if (actor.role === "ADMIN") {
+        const [managers, staff] = await Promise.all([
+          prisma.user.findMany({
+            where: { role: "MANAGER" },
+            orderBy: { name: "asc" },
+            include: {
+              managerLocations: { include: { location: true } },
+            },
+          }),
+          prisma.user.findMany({
+            where: { role: "STAFF" },
+            orderBy: { name: "asc" },
+            include: {
+              staffSkills: { include: { skill: true } },
+              certifications: { include: { location: true } },
+            },
+          }),
+        ]);
+        res.json(mapTeamResponse(managers, staff));
+        return;
+      }
+
+      const managedIds = actor.managerLocationIds;
+      if (managedIds.length === 0) {
+        res.json({ managers: [], staff: [] });
+        return;
+      }
+
       const [managers, staff] = await Promise.all([
         prisma.user.findMany({
-          where: { role: "MANAGER" },
+          where: {
+            role: "MANAGER",
+            managerLocations: { some: { locationId: { in: managedIds } } },
+          },
           orderBy: { name: "asc" },
           include: {
             managerLocations: { include: { location: true } },
           },
         }),
         prisma.user.findMany({
-          where: { role: "STAFF" },
+          where: {
+            role: "STAFF",
+            certifications: { some: { locationId: { in: managedIds } } },
+          },
           orderBy: { name: "asc" },
           include: {
             staffSkills: { include: { skill: true } },
@@ -30,27 +107,7 @@ adminInvitesRouter.get(
           },
         }),
       ]);
-
-      res.json({
-        managers: managers.map((m) => ({
-          id: m.id,
-          name: m.name,
-          email: m.email,
-          locations: m.managerLocations.map((ml) => ({
-            id: ml.location.id,
-            name: ml.location.name,
-          })),
-          skills: [] as { id: string; name: string }[],
-        })),
-        staff: staff.map((s) => ({
-          id: s.id,
-          name: s.name,
-          email: s.email,
-          desiredHoursWeekly: s.desiredHoursWeekly,
-          skills: s.staffSkills.map((ss) => ({ id: ss.skill.id, name: ss.skill.name })),
-          locations: s.certifications.map((c) => ({ id: c.location.id, name: c.location.name })),
-        })),
-      });
+      res.json(mapTeamResponse(managers, staff));
     } catch (err) {
       console.error("[admin/team]", err);
       res.status(500).json({ error: "Could not load team." });

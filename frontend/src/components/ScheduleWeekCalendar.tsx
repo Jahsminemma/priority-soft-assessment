@@ -15,7 +15,7 @@ import {
   todayLocalYmd,
   weekKeyToLocalMondayYmd,
 } from "../utils/weekKey.js";
-import type { ShiftAssignmentRow } from "./ShiftStaffingTable.js";
+import type { ShiftAssignmentRow } from "../types/shiftAssignment.js";
 
 export type StaffRosterRow = { id: string; name: string; skillIds: Set<string> };
 
@@ -107,6 +107,8 @@ type Props = {
   shifts: ShiftDto[];
   assignmentsPerShift: Array<ShiftAssignmentRow[] | undefined>;
   assignmentsLoading: boolean;
+  /** Assignments with marginal OT minutes (FIFO week at this site). */
+  otAssignmentIds?: ReadonlySet<string>;
   skillNameById: Map<string, string>;
   staffRows: StaffRosterRow[];
   rosterLoading: boolean;
@@ -131,6 +133,7 @@ export function ScheduleWeekCalendar({
   shifts,
   assignmentsPerShift,
   assignmentsLoading,
+  otAssignmentIds,
   skillNameById,
   staffRows,
   rosterLoading,
@@ -450,8 +453,12 @@ export function ScheduleWeekCalendar({
                                     <div
                                       className={
                                         onRemoveAssignment
-                                          ? "schedule-cal__shift-pill schedule-cal__shift-pill--assigned schedule-cal__shift-pill--has-remove"
-                                          : "schedule-cal__shift-pill schedule-cal__shift-pill--assigned"
+                                          ? `schedule-cal__shift-pill schedule-cal__shift-pill--assigned schedule-cal__shift-pill--has-remove${
+                                              otAssignmentIds?.has(assignment.assignmentId) ? " schedule-cal__shift-pill--ot" : ""
+                                            }`
+                                          : `schedule-cal__shift-pill schedule-cal__shift-pill--assigned${
+                                              otAssignmentIds?.has(assignment.assignmentId) ? " schedule-cal__shift-pill--ot" : ""
+                                            }`
                                       }
                                       style={{
                                         borderLeftColor: colorForSkill(
@@ -460,6 +467,11 @@ export function ScheduleWeekCalendar({
                                         ),
                                         borderLeftWidth: "4px",
                                       }}
+                                      title={
+                                        otAssignmentIds?.has(assignment.assignmentId)
+                                          ? "Includes overtime (FIFO after 40h this week at this site)"
+                                          : undefined
+                                      }
                                     >
                                       <span className="schedule-cal__assigned-pill-text">
                                         {formatShiftTimeRangeShort(shift.startAtUtc, shift.endAtUtc, locationTz)}

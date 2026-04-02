@@ -26,6 +26,8 @@ export const ShiftDtoSchema = z.object({
   createdById: z.string().uuid().nullable(),
   /** Present on manager/admin list responses: current assignment count. */
   assignedCount: z.number().int().min(0).optional(),
+  /** Staff: active DROP (PENDING or ACCEPTED) for this shift that you created — use to offer “Cancel offer”. */
+  pendingDropRequestId: z.string().uuid().nullable().optional(),
 });
 
 export type ShiftDto = z.infer<typeof ShiftDtoSchema>;
@@ -78,4 +80,6 @@ export type UpdateShiftRequest = z.infer<typeof UpdateShiftRequestSchema>;
 /** Options for gated operations on published shifts (per-shift cutoff). */
 export type ModifyShiftOptions = {
   emergencyOverrideReason?: string | undefined;
+  /** Manager override note for 7th consecutive work day in the ISO week (preview/commit). */
+  seventhDayOverrideReason?: string | undefined;
 };

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelCoverageRequest,
   createCoverageRequest,
   fetchLocations,
   fetchShiftAssignments,
@@ -25,6 +26,7 @@ export default function StaffShiftDetailPage(): React.ReactElement {
   const [offerOpen, setOfferOpen] = useState(false);
   const [swapOpen, setSwapOpen] = useState(false);
   const [offerSuccessOpen, setOfferSuccessOpen] = useState(false);
+  const [cancelOfferSuccessOpen, setCancelOfferSuccessOpen] = useState(false);
 
   const shiftQuery = useQuery({
     queryKey: ["shift", token, shiftId],
@@ -57,6 +59,18 @@ export default function StaffShiftDetailPage(): React.ReactElement {
       setOfferSuccessOpen(true);
       void queryClient.invalidateQueries({ queryKey: ["notifications"] });
       void queryClient.invalidateQueries({ queryKey: ["shifts"] });
+      void queryClient.invalidateQueries({ queryKey: ["shift", token, shiftId] });
+    },
+  });
+
+  const cancelDropMut = useMutation({
+    mutationFn: (requestId: string) => cancelCoverageRequest(token!, requestId),
+    onSuccess: () => {
+      setOfferOpen(false);
+      setCancelOfferSuccessOpen(true);
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.invalidateQueries({ queryKey: ["shifts"] });
+      void queryClient.invalidateQueries({ queryKey: ["shift", token, shiftId] });
     },
   });
 
@@ -144,19 +158,45 @@ export default function StaffShiftDetailPage(): React.ReactElement {
           {imAssigned ? (
             <>
               <div className="staff-shift-detail__actions">
+                {shift.pendingDropRequestId ? (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={cancelDropMut.isPending}
+                    onClick={() => void cancelDropMut.mutateAsync(shift.pendingDropRequestId!)}
+                  >
+                    {cancelDropMut.isPending ? "Cancelling…" : "Cancel offer"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => setOfferOpen((o) => !o)}
+                    disabled={dropMut.isPending}
+                  >
+                    {dropMut.isPending ? "Posting…" : "Offer shift (drop)"}
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="btn btn--primary"
-                  onClick={() => setOfferOpen((o) => !o)}
-                  disabled={dropMut.isPending}
+                  className="btn btn--secondary"
+                  disabled={Boolean(shift.pendingDropRequestId)}
+                  title={
+                    shift.pendingDropRequestId
+                      ? "Cancel your drop offer before requesting a swap."
+                      : undefined
+                  }
+                  onClick={() => setSwapOpen(true)}
                 >
-                  {dropMut.isPending ? "Posting…" : "Offer shift (drop)"}
-                </button>
-                <button type="button" className="btn btn--secondary" onClick={() => setSwapOpen(true)}>
                   Request swap
                 </button>
               </div>
-              {offerOpen ? (
+              {shift.pendingDropRequestId ? (
+                <p className="muted small staff-shift-detail__swap-blocked-hint">
+                  Cancel your drop request before you can request a swap.
+                </p>
+              ) : null}
+              {offerOpen && !shift.pendingDropRequestId ? (
                 <div className="card staff-shift-detail__coverage-hint stack">
                   <p className="muted small" style={{ margin: 0 }}>
                     You stay on this shift until a manager approves coverage. If no one picks it up, the offer expires{" "}
@@ -179,10 +219,19 @@ export default function StaffShiftDetailPage(): React.ReactElement {
                   {dropMut.isError ? <p className="text-error">{(dropMut.error as Error).message}</p> : null}
                 </div>
               ) : null}
+              {cancelDropMut.isError ? (
+                <p className="text-error staff-shift-detail__coverage-hint">{(cancelDropMut.error as Error).message}</p>
+              ) : null}
             </>
           ) : null}
           {imAssigned && token && shiftId ? (
-            <StaffRequestSwapDialog open={swapOpen} onClose={() => setSwapOpen(false)} token={token} shiftId={shiftId} />
+            <StaffRequestSwapDialog
+              open={swapOpen}
+              onClose={() => setSwapOpen(false)}
+              token={token}
+              shiftId={shiftId}
+              pendingDropRequestId={shift.pendingDropRequestId ?? null}
+            />
           ) : null}
         </>
       ) : null}
@@ -193,6 +242,13 @@ export default function StaffShiftDetailPage(): React.ReactElement {
         title="Offer posted"
         message="Your shift is offered for pickup. You stay assigned until a manager approves a change. If no one claims it, the offer ends 24 hours before the shift. Watch Notifications for updates."
         onClose={() => setOfferSuccessOpen(false)}
+      />
+      <FeedbackModal
+        open={cancelOfferSuccessOpen}
+        variant="success"
+        title="Offer withdrawn"
+        message="Your drop offer was cancelled. You remain assigned to this shift."
+        onClose={() => setCancelOfferSuccessOpen(false)}
       />
     </div>
   );

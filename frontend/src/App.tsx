@@ -4,7 +4,6 @@ import { AppShell } from "./layout/AppShell.js";
 import LoginPage from "./pages/LoginPage.js";
 import DashboardPage from "./pages/DashboardPage.js";
 import SchedulePage from "./pages/SchedulePage.js";
-import AssignmentsPage from "./pages/AssignmentsPage.js";
 import StaffSchedulePage from "./pages/StaffSchedulePage.js";
 import StaffShiftDetailPage from "./pages/StaffShiftDetailPage.js";
 import ClockPage from "./pages/ClockPage.js";
@@ -32,7 +31,7 @@ export default function App(): React.ReactElement {
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
-        <Route path="/assignments" element={<AssignmentsPage />} />
+        <Route path="/assignments" element={<Navigate to="/schedule" replace />} />
         <Route path="/my-week" element={<StaffSchedulePage />} />
         <Route path="/my-shifts/:shiftId" element={<StaffShiftDetailPage />} />
         <Route path="/clock" element={<ClockPage />} />

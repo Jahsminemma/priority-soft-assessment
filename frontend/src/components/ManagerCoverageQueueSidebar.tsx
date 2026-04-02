@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { approveCoverageRequest, fetchManagerCoverageQueue } from "../api.js";
+import { approveCoverageRequest, fetchManagerCoverageQueue, managerAssignDropRequest } from "../api.js";
 import { FeedbackModal, messageFromError } from "./FeedbackModal.js";
 import type { ManagerCoverageQueueItem } from "@shiftsync/shared";
 
@@ -23,12 +23,23 @@ function QueueCard({
   item,
   onApprove,
   approvingId,
+  onAssign,
+  assignBusyKey,
 }: {
   item: ManagerCoverageQueueItem;
   onApprove: (id: string) => void;
   approvingId: string | null;
+  onAssign?: (requestId: string, targetUserId: string) => void;
+  /** `${requestId}-${targetUserId}` when that assign is in flight */
+  assignBusyKey?: string | null;
 }): React.ReactElement {
   const busy = approvingId === item.id;
+  const dropModeLabel =
+    item.type === "DROP" && item.status === "PENDING"
+      ? item.calloutMode === "OPEN"
+        ? "Open — first claim"
+        : "Direct assign"
+      : null;
   return (
     <li className="manager-coverage-queue__card">
       <div className="manager-coverage-queue__card-head">
@@ -38,11 +49,12 @@ function QueueCard({
           {item.type === "SWAP" ? "Swap" : "Drop"}
         </span>
         <span className="manager-coverage-queue__status">
-          {item.status === "PENDING"
-            ? item.type === "DROP"
-              ? "Open for pickup"
-              : "Awaiting teammate"
-            : "Ready to approve"}
+          {dropModeLabel ??
+            (item.status === "PENDING"
+              ? item.type === "DROP"
+                ? "Open for pickup"
+                : "Awaiting teammate"
+              : "Ready to approve")}
         </span>
       </div>
       <p className="manager-coverage-queue__names">
@@ -70,6 +82,28 @@ function QueueCard({
         >
           {busy ? "Approving…" : "Approve"}
         </button>
+      ) : null}
+      {item.type === "DROP" && item.status === "PENDING" && onAssign && item.eligibleCandidates.length > 0 ? (
+        <div className="manager-coverage-queue__assign">
+          <p className="manager-coverage-queue__assign-label">Assign to</p>
+          <div className="manager-coverage-queue__assign-btns">
+            {item.eligibleCandidates.map((c) => {
+              const k = `${item.id}-${c.id}`;
+              const thisBusy = assignBusyKey === k;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  disabled={assignBusyKey !== null}
+                  onClick={() => onAssign(item.id, c.id)}
+                >
+                  {thisBusy ? "…" : c.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       ) : null}
     </li>
   );
@@ -107,6 +141,29 @@ export function ManagerCoverageQueueSidebar({ token }: Props): React.ReactElemen
         variant: "error",
         title: "Couldn’t approve",
         message: messageFromError(err, "Approve failed. Refresh and try again."),
+      });
+    },
+  });
+
+  const assignMut = useMutation({
+    mutationFn: ({ requestId, targetUserId }: { requestId: string; targetUserId: string }) =>
+      managerAssignDropRequest(token, requestId, targetUserId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["managerCoverageQueue"] });
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.invalidateQueries({ queryKey: ["shifts"] });
+      void queryClient.invalidateQueries({ queryKey: ["openCallouts"] });
+      setModal({
+        variant: "success",
+        title: "Assigned",
+        message: "The schedule is updating with the new assignment.",
+      });
+    },
+    onError: (err) => {
+      setModal({
+        variant: "error",
+        title: "Couldn’t assign",
+        message: messageFromError(err, "Assign failed. Try again or pick someone else."),
       });
     },
   });
@@ -189,6 +246,12 @@ export function ManagerCoverageQueueSidebar({ token }: Props): React.ReactElemen
                     item={item}
                     onApprove={(id) => approveMut.mutate(id)}
                     approvingId={approveMut.isPending ? approveMut.variables ?? null : null}
+                    onAssign={(rid, tid) => assignMut.mutate({ requestId: rid, targetUserId: tid })}
+                    assignBusyKey={
+                      assignMut.isPending && assignMut.variables
+                        ? `${assignMut.variables.requestId}-${assignMut.variables.targetUserId}`
+                        : null
+                    }
                   />
                 ))}
               </ul>
@@ -202,7 +265,18 @@ export function ManagerCoverageQueueSidebar({ token }: Props): React.ReactElemen
               </h3>
               <ul className="manager-coverage-queue__list">
                 {waitingElsewhere.map((item) => (
-                  <QueueCard key={item.id} item={item} onApprove={() => {}} approvingId={null} />
+                  <QueueCard
+                    key={item.id}
+                    item={item}
+                    onApprove={() => {}}
+                    approvingId={null}
+                    onAssign={(rid, tid) => assignMut.mutate({ requestId: rid, targetUserId: tid })}
+                    assignBusyKey={
+                      assignMut.isPending && assignMut.variables
+                        ? `${assignMut.variables.requestId}-${assignMut.variables.targetUserId}`
+                        : null
+                    }
+                  />
                 ))}
               </ul>
             </section>
@@ -215,7 +289,18 @@ export function ManagerCoverageQueueSidebar({ token }: Props): React.ReactElemen
               </h3>
               <ul className="manager-coverage-queue__list">
                 {pendingDrops.map((item) => (
-                  <QueueCard key={item.id} item={item} onApprove={() => {}} approvingId={null} />
+                  <QueueCard
+                    key={item.id}
+                    item={item}
+                    onApprove={() => {}}
+                    approvingId={null}
+                    onAssign={(rid, tid) => assignMut.mutate({ requestId: rid, targetUserId: tid })}
+                    assignBusyKey={
+                      assignMut.isPending && assignMut.variables
+                        ? `${assignMut.variables.requestId}-${assignMut.variables.targetUserId}`
+                        : null
+                    }
+                  />
                 ))}
               </ul>
             </section>

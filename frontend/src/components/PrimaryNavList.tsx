@@ -4,7 +4,6 @@ import {
   IconBell,
   IconCalendar,
   IconChart,
-  IconClipboard,
   IconClock,
   IconGrid,
   IconSettings,
@@ -17,7 +16,6 @@ export type PrimaryNavListProps = {
   onNavigate?: () => void;
   canManage: boolean;
   isStaff: boolean;
-  isAdmin: boolean;
   unreadNotificationsCount?: number;
 };
 
@@ -30,7 +28,6 @@ export function PrimaryNavList({
   onNavigate,
   canManage,
   isStaff,
-  isAdmin,
   unreadNotificationsCount = 0,
 }: PrimaryNavListProps): React.ReactElement {
   const iw = iconWrapClassName;
@@ -44,7 +41,7 @@ export function PrimaryNavList({
         </span>
         <span>Dashboard</span>
       </NavLink>
-      {isAdmin ? (
+      {canManage ? (
         <NavLink to="/admin/team" onClick={onNavigate} className={linkClass}>
           <span className={iw}>
             <IconUsers />
@@ -59,12 +56,6 @@ export function PrimaryNavList({
               <IconCalendar />
             </span>
             <span>Schedule & shifts</span>
-          </NavLink>
-          <NavLink to="/assignments" onClick={onNavigate} className={linkClass}>
-            <span className={iw}>
-              <IconClipboard />
-            </span>
-            <span>Staffing overview</span>
           </NavLink>
           <NavLink to="/analytics" onClick={onNavigate} className={linkClass}>
             <span className={iw}>

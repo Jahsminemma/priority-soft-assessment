@@ -42,6 +42,12 @@ enum CoverageRequestStatus {
   EXPIRED
 }
 
+/** DROP only: OPEN = short-fuse broadcast, first claim final; DIRECTED = managers assign, not shown to all staff. */
+enum CalloutMode {
+  OPEN
+  DIRECTED
+}
+
 enum AvailabilityExceptionType {
   UNAVAILABLE
   AVAILABLE_OVERRIDE
@@ -59,6 +65,8 @@ model User {
   name               String
   role               UserRole
   desiredHoursWeekly Float?
+  /** Optional wage for labor / OT projections; falls back to location default. */
+  hourlyRate         Float?
   notificationPrefs  Json     @default("{}")
   createdAt          DateTime @default(now())
 
@@ -110,6 +118,8 @@ model Location {
   id       String @id @default(uuid())
   name     String
   tzIana   String
+  /** Default hourly wage for OT/labor projections when staff has no override. */
+  defaultHourlyRate Float?
 
   managerLocations ManagerLocation[]
   shifts           Shift[]
@@ -223,6 +233,8 @@ model CoverageRequest {
   status        CoverageRequestStatus @default(PENDING)
   createdAt     DateTime              @default(now())
   expiresAt     DateTime?
+  /** DROP only: null for SWAP. */
+  calloutMode   CalloutMode?
   shift         Shift                 @relation("CoveragePrimaryShift", fields: [shiftId], references: [id], onDelete: Cascade)
   secondShift   Shift?                @relation("CoverageSecondShift", fields: [secondShiftId], references: [id], onDelete: Cascade)
   requester     User                  @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)

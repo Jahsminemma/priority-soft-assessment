@@ -11,6 +11,7 @@ import {
   fetchShifts,
   fetchSkills,
   fetchWeekScheduleState,
+  fetchOvertimeCostWeekReport,
   publishWeek,
   unpublishWeek,
   updateShift,
@@ -177,6 +178,21 @@ export default function SchedulePage(): React.ReactElement {
     refetchOnMount: "always",
   });
 
+  const overtimeCostQuery = useQuery({
+    queryKey: ["analytics", "overtimeCost", token, locationId, weekKeyNorm],
+    queryFn: () => fetchOvertimeCostWeekReport(token!, locationId, weekKeyNorm),
+    enabled: Boolean(canManage && token && locationId && weekKey),
+    staleTime: 30_000,
+  });
+
+  const otAssignmentIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of overtimeCostQuery.data?.assignments ?? []) {
+      if (a.otMinutes > 0) set.add(a.assignmentId);
+    }
+    return set;
+  }, [overtimeCostQuery.data]);
+
   const shiftsList = shiftsQuery.data ?? [];
 
   /**
@@ -225,6 +241,7 @@ export default function SchedulePage(): React.ReactElement {
   const invalidateShiftsAndAssignments = (): void => {
     void queryClient.invalidateQueries({ queryKey: ["shifts"] });
     void queryClient.invalidateQueries({ queryKey: ["shiftAssignments"] });
+    void queryClient.invalidateQueries({ queryKey: ["analytics", "overtimeCost"] });
   };
 
   const invalidateScheduleWeek = (): void => {
@@ -422,6 +439,7 @@ export default function SchedulePage(): React.ReactElement {
         shifts={shiftsForSelectedWeek}
         assignmentsPerShift={assignmentsPerShift}
         assignmentsLoading={assignmentsLoading}
+        otAssignmentIds={otAssignmentIds}
         skillNameById={skillNameById}
         staffRows={staffRows}
         rosterLoading={rosterLoading}

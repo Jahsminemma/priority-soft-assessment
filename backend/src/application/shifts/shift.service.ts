@@ -21,6 +21,24 @@ import { canManageLocation, type AuthedUser } from "../../security/index.js";
 import { cancelCoverageForShift } from "../coverage/index.js";
 import { bumpScheduleContentRevision } from "../schedule/scheduleRevision.js";
 
+/** DROP requests still in flight (not yet finalized by manager / claim). */
+async function pendingDropRequestIdsByShiftForStaff(
+  staffUserId: string,
+  shiftIds: string[],
+): Promise<Map<string, string>> {
+  if (shiftIds.length === 0) return new Map();
+  const rows = await prisma.coverageRequest.findMany({
+    where: {
+      requesterId: staffUserId,
+      type: "DROP",
+      status: { in: ["PENDING", "ACCEPTED"] },
+      shiftId: { in: shiftIds },
+    },
+    select: { id: true, shiftId: true },
+  });
+  return new Map(rows.map((r) => [r.shiftId, r.id]));
+}
+
 export async function listShiftsByLocationWeek(
   actor: AuthedUser,
   locationId: string,
@@ -93,11 +111,18 @@ export async function listPublishedShiftsForStaff(actor: AuthedUser, weekKey: st
   const publishedLocationIds = new Set(publishedWeeks.map((w) => w.locationId));
   if (publishedLocationIds.size === 0) return [];
 
-  return assignments
+  const sorted = assignments
     .map((a) => a.shift)
     .filter((s) => publishedLocationIds.has(s.locationId))
-    .sort((a, b) => a.startAtUtc.getTime() - b.startAtUtc.getTime())
-    .map((s) => shiftRecordToDto(s));
+    .sort((a, b) => a.startAtUtc.getTime() - b.startAtUtc.getTime());
+  const shiftIds = [...new Set(sorted.map((s) => s.id))];
+  const pendingByShift = await pendingDropRequestIdsByShiftForStaff(actor.id, shiftIds);
+  return sorted.map((s) =>
+    ShiftDtoSchema.parse({
+      ...shiftRecordToDto(s),
+      pendingDropRequestId: pendingByShift.get(s.id) ?? null,
+    }),
+  );
 }
 
 export type ModifyShiftGate = { ok: true } | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF" };
@@ -454,7 +479,19 @@ export async function getShiftForViewer(actor: AuthedUser, shiftId: string): Pro
   if (actor.role === "STAFF") {
     const ok = await staffCanViewThisPublishedShift(actor, row);
     if (!ok) return null;
-    return ShiftDtoSchema.parse(shiftRecordToDto(row));
+    const pendingDrop = await prisma.coverageRequest.findFirst({
+      where: {
+        requesterId: actor.id,
+        shiftId,
+        type: "DROP",
+        status: { in: ["PENDING", "ACCEPTED"] },
+      },
+      select: { id: true },
+    });
+    return ShiftDtoSchema.parse({
+      ...shiftRecordToDto(row),
+      pendingDropRequestId: pendingDrop?.id ?? null,
+    });
   }
 
   if (!canManageLocation(actor, row.locationId)) return null;

@@ -6,6 +6,7 @@ import {
   AvailabilityExceptionInputSchema,
   CreateCoverageRequestSchema,
   ManagerCoverageQueueSchema,
+  OpenCalloutListSchema,
   CreateInviteRequestSchema,
   CreateInviteResponseSchema,
   StaffLocationsPatchRequestSchema,
@@ -33,10 +34,13 @@ import {
   type NotificationDto,
   type CreateCoverageRequest,
   type ManagerCoverageQueueItem,
+  type OpenCalloutItem,
   type NotificationPrefs,
   normalizeIsoWeekKey,
+  OvertimeCostWeekResponseSchema,
   WeekScheduleStateResponseSchema,
   EMERGENCY_OVERRIDE_MIN_LEN,
+  type OvertimeCostWeekResponse,
 } from "@shiftsync/shared";
 
 const base = import.meta.env.VITE_API_URL ?? "";
@@ -68,6 +72,42 @@ async function readApiError(res: Response, fallback: string): Promise<string> {
     return (j as { error: string }).error;
   }
   return fallback;
+}
+
+function coverageCodeToMessage(code: string): string {
+  const m: Record<string, string> = {
+    NOT_PENDING: "This request is no longer pending (it may have been filled or cancelled). Refresh and try again.",
+    CONFLICT: "This request was updated by someone else. Refresh and try again.",
+    CONSTRAINTS: "Scheduling rules blocked this assignment.",
+    NOT_ELIGIBLE: "That person is not eligible for this shift (skill or site certification).",
+    INVALID: "This request is invalid or no longer exists.",
+    FORBIDDEN: "You don’t have permission to do this.",
+    NO_ASSIGNMENT: "The original assignment could not be found. Refresh and try again.",
+    SELF: "You can’t claim your own shift offer.",
+    DIRECTED_USE_ASSIGN: "This drop must be assigned by a manager.",
+    NOT_TARGET: "You are not the intended recipient for this request.",
+    NOT_ACCEPTED: "This request is not ready for approval yet.",
+    NO_TARGET: "No target is set for this request.",
+    NO_TARGET_ASSIGNMENT: "The other person is no longer assigned to the trade shift.",
+  };
+  return m[code] ?? code;
+}
+
+async function throwCoverageHttpError(res: Response, fallback: string): Promise<never> {
+  const j: unknown = await res.json().catch(() => ({}));
+  if (typeof j === "object" && j !== null) {
+    const o = j as { error?: unknown; messages?: unknown; message?: unknown };
+    if (Array.isArray(o.messages) && o.messages.length > 0 && o.messages.every((x) => typeof x === "string")) {
+      throw new Error(o.messages.join("\n\n"));
+    }
+    if (typeof o.message === "string" && o.message.trim()) {
+      throw new Error(o.message);
+    }
+    if (typeof o.error === "string") {
+      throw new Error(coverageCodeToMessage(o.error));
+    }
+  }
+  throw new Error(fallback);
 }
 
 export async function createInvite(
@@ -394,12 +434,15 @@ export async function previewAssignment(
   shiftId: string,
   staffUserId: string,
   emergencyOverrideReason?: string,
+  seventhDayOverrideReason?: string,
 ): Promise<unknown> {
   const em = emergencyOverrideReason?.trim();
+  const s7 = seventhDayOverrideReason?.trim();
   const body = AssignmentPreviewRequestSchema.parse({
     shiftId,
     staffUserId,
     ...(em !== undefined && em.length >= EMERGENCY_OVERRIDE_MIN_LEN ? { emergencyOverrideReason: em } : {}),
+    ...(s7 !== undefined && s7.length > 0 ? { seventhDayOverrideReason: s7 } : {}),
   });
   const res = await fetch(`${base}/api/assignments/preview`, {
     method: "POST",
@@ -480,14 +523,7 @@ export async function acceptCoverageRequest(token: string, requestId: string): P
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) {
-    const err: unknown = await res.json().catch(() => ({}));
-    throw new Error(
-      typeof err === "object" && err !== null && "error" in err
-        ? String((err as { error: unknown }).error)
-        : "Accept failed",
-    );
-  }
+  if (!res.ok) await throwCoverageHttpError(res, "Accept failed");
 }
 
 export async function approveCoverageRequest(token: string, requestId: string): Promise<void> {
@@ -495,14 +531,7 @@ export async function approveCoverageRequest(token: string, requestId: string): 
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) {
-    const err: unknown = await res.json().catch(() => ({}));
-    throw new Error(
-      typeof err === "object" && err !== null && "error" in err
-        ? String((err as { error: unknown }).error)
-        : "Approve failed",
-    );
-  }
+  if (!res.ok) await throwCoverageHttpError(res, "Approve failed");
 }
 
 export async function cancelCoverageRequest(token: string, requestId: string): Promise<void> {
@@ -534,6 +563,38 @@ export async function fetchManagerCoverageQueue(token: string): Promise<ManagerC
   });
   if (!res.ok) throw new Error("Could not load coverage queue.");
   return ManagerCoverageQueueSchema.parse(await res.json());
+}
+
+export async function fetchOpenCallouts(token: string): Promise<OpenCalloutItem[]> {
+  const res = await fetch(`${base}/api/coverage/open-callouts`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Could not load open callouts.");
+  return OpenCalloutListSchema.parse(await res.json());
+}
+
+export async function claimCoverageRequest(token: string, requestId: string): Promise<void> {
+  const res = await fetch(`${base}/api/coverage/${encodeURIComponent(requestId)}/claim`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) await throwCoverageHttpError(res, "Claim failed");
+}
+
+export async function managerAssignDropRequest(
+  token: string,
+  requestId: string,
+  targetUserId: string,
+): Promise<void> {
+  const res = await fetch(`${base}/api/coverage/${encodeURIComponent(requestId)}/manager-assign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ targetUserId }),
+  });
+  if (!res.ok) await throwCoverageHttpError(res, "Assign failed");
 }
 
 export async function clockIn(token: string, shiftId: string): Promise<{ sessionId: string }> {
@@ -636,6 +697,20 @@ export async function fetchOvertimeWeekReport(
   if (!res.ok) throw new Error("Overtime report failed");
   const data: unknown = await res.json();
   return z.array(OvertimeRowSchema).parse(data);
+}
+
+export async function fetchOvertimeCostWeekReport(
+  token: string,
+  locationId: string | "all",
+  weekKey: string,
+): Promise<OvertimeCostWeekResponse> {
+  const q = new URLSearchParams({ locationId, weekKey: normalizeIsoWeekKey(weekKey) });
+  const res = await fetch(`${base}/api/analytics/overtime-cost/week?${q}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Overtime cost report failed");
+  const data: unknown = await res.json();
+  return OvertimeCostWeekResponseSchema.parse(data);
 }
 
 export async function getNotificationPrefs(token: string): Promise<NotificationPrefs> {

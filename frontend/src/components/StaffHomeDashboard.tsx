@@ -1,11 +1,13 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { normalizeIsoWeekKey } from "@shiftsync/shared";
 import {
+  claimCoverageRequest,
   fetchLocations,
   fetchNotifications,
+  fetchOpenCallouts,
   fetchShiftsStaff,
   fetchSkills,
 } from "../api.js";
@@ -32,6 +34,7 @@ function IconChevronRight(): React.ReactElement {
 }
 
 export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps): React.ReactElement {
+  const queryClient = useQueryClient();
   const weekKey = useMemo(() => normalizeIsoWeekKey(initialWeekKeyFromToday()), []);
   const nextWeekKey = useMemo(() => shiftWeekKey(weekKey, 1), [weekKey]);
 
@@ -66,6 +69,22 @@ export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps)
     queryKey: ["notifications", token],
     queryFn: () => fetchNotifications(token),
     enabled: Boolean(token),
+  });
+
+  const openCalloutsQuery = useQuery({
+    queryKey: ["openCallouts", token],
+    queryFn: () => fetchOpenCallouts(token),
+    enabled: Boolean(token),
+    staleTime: 15_000,
+  });
+
+  const claimOpenMut = useMutation({
+    mutationFn: (requestId: string) => claimCoverageRequest(token, requestId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["openCallouts"] });
+      void queryClient.invalidateQueries({ queryKey: ["shifts"] });
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
   });
 
   const locById = useMemo(
@@ -145,6 +164,41 @@ export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps)
           <span className="staff-dash__meta-label">Unread alerts</span>
         </Link>
       </section>
+
+      {openCalloutsQuery.data && openCalloutsQuery.data.length > 0 ? (
+        <section className="staff-dash__open-callouts card" aria-labelledby="staff-open-callouts-title">
+          <h2 id="staff-open-callouts-title" className="staff-dash__open-callouts-title">
+            Open shifts — claim now
+          </h2>
+          <p className="staff-dash__open-callouts-hint muted">
+            A teammate called out. First eligible person to claim gets the shift (rules apply).
+          </p>
+          <ul className="staff-dash__open-callouts-list">
+            {openCalloutsQuery.data.map((c) => (
+              <li key={c.requestId} className="staff-dash__open-callout-row">
+                <div>
+                  <p className="staff-dash__open-callout-who">
+                    <strong>{c.requesterName}</strong> needs coverage
+                  </p>
+                  <p className="staff-dash__open-callout-shift">
+                    {c.shift.locationName} · {c.shift.skillName}
+                    <br />
+                    {c.shift.localDateLabel} · {c.shift.localTimeLabel}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  disabled={claimOpenMut.isPending}
+                  onClick={() => claimOpenMut.mutate(c.requestId)}
+                >
+                  {claimOpenMut.isPending && claimOpenMut.variables === c.requestId ? "…" : "Claim"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {loading ? <p className="muted staff-dash__loading">Loading your schedule…</p> : null}
       {error ? <p className="text-error">We couldn’t load your shifts. Try again.</p> : null}

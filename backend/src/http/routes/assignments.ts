@@ -50,6 +50,7 @@ assignmentsRouter.post(
     }
     const out = await previewAssignment(parsed.data.shiftId, parsed.data.staffUserId, user, {
       emergencyOverrideReason: parsed.data.emergencyOverrideReason,
+      seventhDayOverrideReason: parsed.data.seventhDayOverrideReason,
     });
     res.json(out);
   },
