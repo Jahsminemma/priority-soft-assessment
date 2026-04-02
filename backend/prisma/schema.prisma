@@ -278,7 +278,7 @@ model ClockSession {
   shift          Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 }
 
-/** Short-lived code staff shows to a manager to verify clock-in (consumed when manager confirms). */
+/** Short-lived code staff shows to a manager to verify clock-in. */
 model ClockInVerificationCode {
   id               String    @id @default(uuid())
   code             String    @unique

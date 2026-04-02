@@ -90,24 +90,28 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
         requestId,
       );
     }
+
     case "coverage.accepted":
       return withOptionalRequestId(
         "Coverage request accepted",
         "The other person accepted. If you’re the original requester and changed your mind, you can Withdraw before a manager approves.",
         requestId,
       );
+
     case "coverage.declined":
       return withOptionalRequestId(
         "Swap request declined",
         "The teammate declined your swap request. You can pick another person to trade with, or offer your shift for pickup.",
         requestId,
       );
+
     case "coverage.ready_for_approval":
       return withOptionalRequestId(
         "Ready for your approval",
         "The teammate has accepted. Review and tap Approve to finalize the schedule change.",
         requestId,
       );
+      
     case "coverage.shift_assigned": {
       const swap = bool(p.swap);
       const fromDrop = bool(p.fromDrop);

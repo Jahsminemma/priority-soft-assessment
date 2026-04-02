@@ -1,6 +1,8 @@
 import { Router } from "express";
 import {
+  compareIsoWeekKeys,
   CreateShiftRequestSchema,
+  ListShiftsManageQuerySchema,
   ListShiftsQuerySchema,
   ListShiftsStaffQuerySchema,
   ShiftDtoSchema,
@@ -14,12 +16,47 @@ import {
   listAssignmentsForShift,
   listPublishedShiftsForStaff,
   listShiftsByLocationWeek,
+  listShiftsForManage,
   updateShift,
 } from "../../application/shifts/index.js";
 import { authMiddleware, requireRoles, type AuthedRequest } from "../middleware/index.js";
 import { singleParam } from "../paramId.js";
 
 export const shiftsRouter = Router();
+
+shiftsRouter.get(
+  "/manage",
+  authMiddleware,
+  requireRoles("ADMIN", "MANAGER"),
+  async (req: AuthedRequest, res) => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const parsed = ListShiftsManageQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const { fromWeek, toWeek, locationId } = parsed.data;
+    if (compareIsoWeekKeys(fromWeek, toWeek) > 0) {
+      res.status(400).json({ error: "fromWeek must be before or equal to toWeek" });
+      return;
+    }
+    const locId = locationId;
+    const rows = await listShiftsForManage(user, {
+      fromWeek,
+      toWeek,
+      ...(locId !== undefined ? { locationId: locId } : {}),
+    });
+    if (rows === null) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    res.json(rows);
+  },
+);
 
 shiftsRouter.get(
   "/:id/assignments",

@@ -1,4 +1,4 @@
-import { useId, useMemo, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { useEffect, useId, useMemo, type ChangeEvent, type ReactElement, type ReactNode } from "react";
 import { DateTime } from "luxon";
 import type { LocationSummary, ShiftDto } from "@shiftsync/shared";
 import { compareIsoWeekKeys, normalizeIsoWeekKey } from "@shiftsync/shared";
@@ -104,6 +104,8 @@ type Props = {
   onWeekKeyChange: (weekKey: string) => void;
   minWeekKey?: string;
   locationTz: string;
+  /** When set, scrolls this shift into view and highlights it (e.g. deep link from Manage shifts). */
+  highlightShiftId?: string | null;
   shifts: ShiftDto[];
   assignmentsPerShift: Array<ShiftAssignmentRow[] | undefined>;
   assignmentsLoading: boolean;
@@ -130,6 +132,7 @@ export function ScheduleWeekCalendar({
   onWeekKeyChange,
   minWeekKey,
   locationTz,
+  highlightShiftId = null,
   shifts,
   assignmentsPerShift,
   assignmentsLoading,
@@ -146,6 +149,12 @@ export function ScheduleWeekCalendar({
 }: Props): ReactElement {
   const weekJumpId = useId();
   const dayKeys = useMemo(() => isoWeekDayKeysInLocationZone(weekKey, locationTz), [weekKey, locationTz]);
+
+  useEffect(() => {
+    if (!highlightShiftId) return;
+    const el = document.querySelector<HTMLElement>(`[data-schedule-shift="${highlightShiftId}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [highlightShiftId, shifts, assignmentsLoading]);
 
   const rangeCompact = useMemo(
     () => formatWeekRangeCompactInZone(weekKey, locationTz),
@@ -364,7 +373,10 @@ export function ScheduleWeekCalendar({
                           <li key={s.id}>
                             <button
                               type="button"
-                              className="schedule-cal__shift-pill schedule-cal__shift-pill--click"
+                              data-schedule-shift={s.id}
+                              className={`schedule-cal__shift-pill schedule-cal__shift-pill--click${
+                                highlightShiftId === s.id ? " schedule-cal__shift-pill--highlight" : ""
+                              }`}
                               style={{
                                 borderLeftColor: colorForSkill(s.requiredSkillId, skillNameById.get(s.requiredSkillId)),
                                 borderLeftWidth: "4px",
@@ -451,14 +463,15 @@ export function ScheduleWeekCalendar({
                                 {placed.map(({ shift, assignment }) => (
                                   <li key={assignment.assignmentId} className="schedule-cal__assigned-item">
                                     <div
+                                      data-schedule-shift={shift.id}
                                       className={
                                         onRemoveAssignment
                                           ? `schedule-cal__shift-pill schedule-cal__shift-pill--assigned schedule-cal__shift-pill--has-remove${
                                               otAssignmentIds?.has(assignment.assignmentId) ? " schedule-cal__shift-pill--ot" : ""
-                                            }`
+                                            }${highlightShiftId === shift.id ? " schedule-cal__shift-pill--highlight" : ""}`
                                           : `schedule-cal__shift-pill schedule-cal__shift-pill--assigned${
                                               otAssignmentIds?.has(assignment.assignmentId) ? " schedule-cal__shift-pill--ot" : ""
-                                            }`
+                                            }${highlightShiftId === shift.id ? " schedule-cal__shift-pill--highlight" : ""}`
                                       }
                                       style={{
                                         borderLeftColor: colorForSkill(

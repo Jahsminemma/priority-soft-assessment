@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DateTime } from "luxon";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -53,7 +54,9 @@ export default function SchedulePage(): React.ReactElement {
   const { token, user } = useAuth();
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [locationId, setLocationId] = useState("");
+  const [highlightShiftId, setHighlightShiftId] = useState<string | null>(null);
   const [weekKey, setWeekKey] = useState(() => normalizeIsoWeekKey(initialWeekKeyFromToday()));
   const [createSkillId, setCreateSkillId] = useState("");
   const [assignCell, setAssignCell] = useState<{
@@ -116,9 +119,31 @@ export default function SchedulePage(): React.ReactElement {
 
   useEffect(() => {
     const list = locationsQuery.data;
-    if (!list?.length || locationId) return;
-    setLocationId(list[0]!.id);
-  }, [locationsQuery.data, locationId]);
+    if (!list?.length) return;
+    const loc = searchParams.get("locationId");
+    if (loc && list.some((l) => l.id === loc)) {
+      setLocationId(loc);
+    } else if (!locationId) {
+      setLocationId(list[0]!.id);
+    }
+  }, [locationsQuery.data, searchParams, locationId]);
+
+  useEffect(() => {
+    const wk = searchParams.get("weekKey");
+    if (wk) setWeekKey(normalizeIsoWeekKey(wk));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focusShiftId");
+    const loc = searchParams.get("locationId");
+    if (focus && loc && locationId === loc) {
+      setHighlightShiftId(focus);
+    } else if (!focus) {
+      setHighlightShiftId(null);
+    } else if (focus && (!loc || (locationId && locationId !== loc))) {
+      setHighlightShiftId(null);
+    }
+  }, [searchParams, locationId]);
 
   useEffect(() => {
     const skills = skillsQuery.data;
@@ -436,6 +461,7 @@ export default function SchedulePage(): React.ReactElement {
         onWeekKeyChange={setWeekKey}
         minWeekKey={minWeekKey}
         locationTz={locationTz}
+        highlightShiftId={highlightShiftId}
         shifts={shiftsForSelectedWeek}
         assignmentsPerShift={assignmentsPerShift}
         assignmentsLoading={assignmentsLoading}

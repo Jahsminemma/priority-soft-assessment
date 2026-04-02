@@ -19,6 +19,7 @@ import {
   RegisterVerifyResponseSchema,
   ReplaceAvailabilityRulesSchema,
   ShiftDtoSchema,
+  ManageShiftRowSchema,
   CreateShiftRequestSchema,
   UpdateShiftRequestSchema,
   type AvailabilityExceptionBatchInput,
@@ -30,6 +31,7 @@ import {
   type RegisterVerifyResponse,
   type ReplaceAvailabilityRules,
   type ShiftDto,
+  type ManageShiftRow,
   type LocationSummary,
   type NotificationDto,
   type CreateCoverageRequest,
@@ -49,6 +51,7 @@ import {
   type ClockCodePreviewResponse,
   AuditLogRowDtoSchema,
   type AuditLogRowDto,
+  type AuditListQuery,
 } from "@shiftsync/shared";
 
 const base = import.meta.env.VITE_API_URL ?? "";
@@ -201,6 +204,25 @@ export async function fetchSkills(token: string): Promise<Array<{ id: string; na
   if (!res.ok) throw new Error("Skills failed");
   const data: unknown = await res.json();
   return z.array(SkillOptionSchema).parse(data);
+}
+
+export async function fetchShiftsManage(
+  token: string,
+  q: { fromWeek: string; toWeek: string; locationId?: string },
+  signal?: AbortSignal,
+): Promise<ManageShiftRow[]> {
+  const fw = normalizeIsoWeekKey(q.fromWeek);
+  const tw = normalizeIsoWeekKey(q.toWeek);
+  const params = new URLSearchParams({ fromWeek: fw, toWeek: tw });
+  if (q.locationId) params.set("locationId", q.locationId);
+  const res = await fetch(`${base}/api/shifts/manage?${params.toString()}`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` },
+    ...(signal !== undefined ? { signal } : {}),
+  });
+  if (!res.ok) throw new Error("Shifts list failed");
+  const data: unknown = await res.json();
+  return z.array(ManageShiftRowSchema).parse(data);
 }
 
 export async function fetchShifts(
@@ -714,6 +736,19 @@ export async function approveClockInCode(token: string, code: string): Promise<{
   }
   const data: unknown = await res.json();
   return ClockApproveCodeResponseSchema.parse(data);
+}
+
+export async function fetchAuditList(token: string, query: AuditListQuery): Promise<AuditLogRowDto[]> {
+  const q = new URLSearchParams();
+  if (query.from) q.set("from", query.from);
+  if (query.to) q.set("to", query.to);
+  if (query.locationId) q.set("locationId", query.locationId);
+  const res = await fetch(`${base}/api/audit/list?${q.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to load audit logs");
+  const data: unknown = await res.json();
+  return z.array(AuditLogRowDtoSchema).parse(data);
 }
 
 export async function fetchAuditForShift(token: string, shiftId: string): Promise<AuditLogRowDto[]> {

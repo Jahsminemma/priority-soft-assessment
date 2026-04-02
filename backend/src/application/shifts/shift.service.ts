@@ -4,8 +4,10 @@ import { isValidEmergencyOverrideReason } from "@shiftsync/shared";
 import {
   compareIsoWeekKeys,
   isoWeekKeyDbVariants,
+  ManageShiftRowSchema,
   normalizeIsoWeekKey,
   ShiftDtoSchema,
+  type ManageShiftRow,
 } from "@shiftsync/shared";
 import { DateTime } from "luxon";
 import {
@@ -496,5 +498,84 @@ export async function getShiftForViewer(actor: AuthedUser, shiftId: string): Pro
 
   if (!canManageLocation(actor, row.locationId)) return null;
   return ShiftDtoSchema.parse(shiftRecordToDto(row, { assignedCount: row._count.assignments }));
+}
+
+function enumerateWeekKeysInclusive(fromWeek: string, toWeek: string): string[] {
+  const start = normalizeIsoWeekKey(fromWeek);
+  const end = normalizeIsoWeekKey(toWeek);
+  if (compareIsoWeekKeys(start, end) > 0) return [];
+
+  const startM = /^(\d{4})-W(\d{1,2})$/.exec(start);
+  const endM = /^(\d{4})-W(\d{1,2})$/.exec(end);
+  if (!startM || !endM) return [];
+
+  let cur = DateTime.fromObject(
+    { weekYear: Number(startM[1]), weekNumber: Number(startM[2]), weekday: 1 },
+    { zone: "utc" },
+  );
+  const endDt = DateTime.fromObject(
+    { weekYear: Number(endM[1]), weekNumber: Number(endM[2]), weekday: 1 },
+    { zone: "utc" },
+  );
+  const out: string[] = [];
+  while (cur <= endDt) {
+    out.push(`${cur.weekYear}-W${String(cur.weekNumber).padStart(2, "0")}`);
+    cur = cur.plus({ weeks: 1 });
+  }
+  return out;
+}
+
+/** Cross-week shift list for the Manage Shifts page (managers: their locations; admins: all or filtered). */
+export async function listShiftsForManage(
+  actor: AuthedUser,
+  opts: { fromWeek: string; toWeek: string; locationId?: string },
+): Promise<ManageShiftRow[] | null> {
+  if (actor.role !== "ADMIN" && actor.role !== "MANAGER") return null;
+
+  let locationIds: string[];
+  if (opts.locationId) {
+    if (!canManageLocation(actor, opts.locationId)) return null;
+    locationIds = [opts.locationId];
+  } else if (actor.role === "ADMIN") {
+    const locs = await prisma.location.findMany({ select: { id: true } });
+    locationIds = locs.map((l) => l.id);
+  } else {
+    locationIds = actor.managerLocationIds;
+  }
+
+  if (locationIds.length === 0) return [];
+
+  const weekKeys = enumerateWeekKeysInclusive(opts.fromWeek, opts.toWeek);
+  if (weekKeys.length === 0) return [];
+
+  const variantKeys = [...new Set(weekKeys.flatMap((wk) => isoWeekKeyDbVariants(wk)))];
+
+  const rows = await prisma.shift.findMany({
+    where: {
+      locationId: { in: locationIds },
+      weekKey: { in: variantKeys },
+    },
+    orderBy: { startAtUtc: "asc" },
+    include: {
+      location: { select: { name: true } },
+      assignments: {
+        where: { status: "ASSIGNED" },
+        include: { staff: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+
+  return rows.map((s) =>
+    ManageShiftRowSchema.parse({
+      ...shiftRecordToDto(s, { assignedCount: s.assignments.length }),
+      locationName: s.location.name,
+      assignments: s.assignments.map((a) => ({
+        assignmentId: a.id,
+        staffUserId: a.staffUserId,
+        staffName: a.staff.name,
+      })),
+    }),
+  );
 }
 

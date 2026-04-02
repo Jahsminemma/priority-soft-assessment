@@ -71,6 +71,7 @@ export function AppShell(): React.ReactElement {
   }, [user?.id]);
 
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
+  const isAdmin = user?.role === "ADMIN";
   const isStaff = user?.role === "STAFF";
   const unreadCount = useQuery({
     queryKey: ["notifications", token],
@@ -106,6 +107,7 @@ export function AppShell(): React.ReactElement {
               linkClass={sidebarLinkClass}
               iconWrapClassName="nav-rail__icon-wrap"
               canManage={canManage}
+              isAdmin={isAdmin}
               isStaff={isStaff}
               unreadNotificationsCount={unreadNotificationsCount}
             />
@@ -180,6 +182,7 @@ export function AppShell(): React.ReactElement {
         userName={user?.name}
         userRole={user?.role}
         canManage={canManage}
+        isAdmin={isAdmin}
         isStaff={isStaff}
         onSignOut={signOut}
         unreadNotificationsCount={unreadNotificationsCount}

@@ -14,6 +14,7 @@ import AvailabilityPage from "./pages/AvailabilityPage.js";
 import RegisterPage from "./pages/RegisterPage.js";
 import TeamPage from "./pages/TeamPage.js";
 import AuditTrailPage from "./pages/AuditTrailPage.js";
+import ManageShiftsPage from "./pages/ManageShiftsPage.js";
 
 function ProtectedLayout(): React.ReactElement {
   const { token } = useAuth();
@@ -32,6 +33,7 @@ export default function App(): React.ReactElement {
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
+        <Route path="/manage/shifts" element={<ManageShiftsPage />} />
         <Route path="/assignments" element={<Navigate to="/schedule" replace />} />
         <Route path="/my-week" element={<StaffSchedulePage />} />
         <Route path="/my-shifts/:shiftId" element={<StaffShiftDetailPage />} />

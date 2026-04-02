@@ -10,6 +10,7 @@ type MobileNavDrawerProps = {
   userName: string | undefined;
   userRole: string | undefined;
   canManage: boolean;
+  isAdmin: boolean;
   isStaff: boolean;
   onSignOut: () => void;
   unreadNotificationsCount?: number;
@@ -25,6 +26,7 @@ export function MobileNavDrawer({
   userName,
   userRole,
   canManage,
+  isAdmin,
   isStaff,
   onSignOut,
   unreadNotificationsCount = 0,
@@ -86,6 +88,7 @@ export function MobileNavDrawer({
             iconWrapClassName="nav-rail__icon-wrap"
             onNavigate={onClose}
             canManage={canManage}
+            isAdmin={isAdmin}
             isStaff={isStaff}
             unreadNotificationsCount={unreadNotificationsCount}
           />
