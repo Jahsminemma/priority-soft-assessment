@@ -863,6 +863,7 @@ body {
 
 .manager-section--account {
   padding: 20px 22px;
+  margin-top: 10px;
   border-radius: 16px;
   background: var(--surface);
   border: 1px solid var(--border);

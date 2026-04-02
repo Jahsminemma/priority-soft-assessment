@@ -18,6 +18,20 @@
    npx prisma migrate deploy
    npm run db:seed
   ```
+
+   **Replace the whole database with only seed data** (destructive — deletes all rows and any non-migration state):
+
+   ```bash
+   cd backend
+   npm run db:reset
+   ```
+
+   Prisma will prompt for confirmation, then drop/recreate the schema, apply migrations, and run `prisma db seed`. From repo root: `npm run db:reset`.
+
+   Non-interactive (e.g. scripts): `cd backend && npx prisma migrate reset --force` (still runs the seed).
+
+   Use the same commands against any Postgres by setting `DATABASE_URL` (e.g. Render external URL). **Never** run reset on a production database you care about unless you intend to wipe it.
+
 4. **Run API + UI**:
   ```bash
    cd ..
@@ -33,14 +47,15 @@
 | ------- | -------------------------- | ------------- |
 | Admin   | `admin@coastaleats.test`   | `password123` |
 | Manager | `manager@coastaleats.test` | `password123` |
-| Staff   | `sam@coastaleats.test`     | `password123` |
+| Staff   | `sam@coastaleats.test` … `eve@coastaleats.test` | `password123` |
 
+Seed covers **three locations** (SF, LA, NYC), **skills** (server, bartender, line_cook, host), and the **next ISO week** (Monday of the week after you run seed) with scenarios: partial headcount, DRAFT + PROPOSED, **PENDING SWAP** and **OPEN DROP** coverage, **double-book** and **10h rest** conflicts on Jamie, **>12h day** shift, Sam **Wednesday unavailability**, **weekend-only** staff (Eve), LA line cook understaffed, NYC Thu shifts, optional sample **clock session**, and **hourly rates** for labor/analytics. In-app notifications are not inserted by seed (they come from real workflows). Re-run `npm run db:seed` to re-anchor seeded shifts to the **next** ISO week from that moment. In the app, open the schedule for that week to see the demo shifts.
 
 ## Implemented so far
 
 - JWT login + role-aware assignment preview/commit
 - Server-side constraint engine (overlap, 10h rest, skill, certification, availability, daily/weekly warnings)
-- Prisma schema + seed data (4 locations, skills, sample shift)
+- Prisma schema + rich seed data (locations, skills, multi-scenario schedule)
 - Socket.IO server attached (auth on connect); UI wiring for broadcasts comes next
 
 ## Assumptions (intentional ambiguities)

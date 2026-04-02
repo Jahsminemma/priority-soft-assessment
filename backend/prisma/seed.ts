@@ -7,44 +7,61 @@ dotenv.config();
 
 const prisma = new PrismaClient();
 
-/** Fixed shift row ids (see frontend/src/constants.ts SEED). */
+/**
+ * Stable shift UUIDs (see frontend/src/constants.ts SEED).
+ * Next ISO week (Monday-start) after seed run — pick that week in the UI to see seeded shifts.
+ */
 const SHIFT_IDS = {
   sfServerDraft: "d0000000-0000-4000-8000-000000000001",
   sfServerPartial: "d0000000-0000-4000-8000-000000000002",
   sfBartenderFull: "d0000000-0000-4000-8000-000000000003",
   laBartenderDraft: "d0000000-0000-4000-8000-000000000004",
+  nyHost: "d0000000-0000-4000-8000-000000000005",
+  nyServer: "d0000000-0000-4000-8000-000000000006",
+  sfWedDrop: "d0000000-0000-4000-8000-000000000007",
+  sfJamieOverlapA: "d0000000-0000-4000-8000-000000000008",
+  sfJamieOverlapB: "d0000000-0000-4000-8000-000000000009",
+  sfJamieRestMon: "d0000000-0000-4000-8000-00000000000a",
+  sfJamieRestTue: "d0000000-0000-4000-8000-00000000000b",
+  sfSatLongJamie: "d0000000-0000-4000-8000-00000000000c",
+  laLineCookThu: "d0000000-0000-4000-8000-00000000000d",
 } as const;
+
+const ALL_SHIFT_IDS: string[] = Object.values(SHIFT_IDS);
 
 async function main(): Promise<void> {
   const passwordHash = await bcrypt.hash("password123", 10);
 
   const locSf = await prisma.location.upsert({
     where: { id: "a0000000-0000-4000-8000-000000000001" },
-    update: {},
+    update: { defaultHourlyRate: 22 },
     create: {
       id: "a0000000-0000-4000-8000-000000000001",
       name: "Coastal Eats — SF",
       tzIana: "America/Los_Angeles",
+      defaultHourlyRate: 22,
     },
   });
 
   const locLa = await prisma.location.upsert({
     where: { id: "a0000000-0000-4000-8000-000000000002" },
-    update: {},
+    update: { defaultHourlyRate: 20 },
     create: {
       id: "a0000000-0000-4000-8000-000000000002",
       name: "Coastal Eats — LA",
       tzIana: "America/Los_Angeles",
+      defaultHourlyRate: 20,
     },
   });
 
   const locNy = await prisma.location.upsert({
     where: { id: "a0000000-0000-4000-8000-000000000003" },
-    update: {},
+    update: { defaultHourlyRate: 25 },
     create: {
       id: "a0000000-0000-4000-8000-000000000003",
       name: "Coastal Eats — NYC",
       tzIana: "America/New_York",
+      defaultHourlyRate: 25,
     },
   });
 
@@ -69,7 +86,7 @@ async function main(): Promise<void> {
     create: { id: "b0000000-0000-4000-8000-000000000004", name: "host" },
   });
 
-  const admin = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: "admin@coastaleats.test" },
     update: {},
     create: {
@@ -106,7 +123,7 @@ async function main(): Promise<void> {
 
   const staffSam = await prisma.user.upsert({
     where: { email: "sam@coastaleats.test" },
-    update: { name: "Sam Rivera" },
+    update: { name: "Sam Rivera", hourlyRate: 24 },
     create: {
       id: "c0000000-0000-4000-8000-000000000010",
       email: "sam@coastaleats.test",
@@ -114,12 +131,13 @@ async function main(): Promise<void> {
       name: "Sam Rivera",
       role: "STAFF",
       desiredHoursWeekly: 32,
+      hourlyRate: 24,
     },
   });
 
   const staffJordan = await prisma.user.upsert({
     where: { email: "jordan@coastaleats.test" },
-    update: { name: "Jordan Lee" },
+    update: { name: "Jordan Lee", hourlyRate: 26 },
     create: {
       id: "c0000000-0000-4000-8000-000000000011",
       email: "jordan@coastaleats.test",
@@ -127,10 +145,10 @@ async function main(): Promise<void> {
       name: "Jordan Lee",
       role: "STAFF",
       desiredHoursWeekly: 28,
+      hourlyRate: 26,
     },
   });
 
-  /** Server skill + LA cert only — excluded from SF roster; use to test location filter. */
   const staffCasey = await prisma.user.upsert({
     where: { email: "casey@coastaleats.test" },
     update: { name: "Casey Patel" },
@@ -144,7 +162,6 @@ async function main(): Promise<void> {
     },
   });
 
-  /** Bartender + LA cert only — roster for LA bartender shifts; not on SF. */
   const staffRiley = await prisma.user.upsert({
     where: { email: "riley@coastaleats.test" },
     update: { name: "Riley Chen" },
@@ -158,7 +175,6 @@ async function main(): Promise<void> {
     },
   });
 
-  /** Extra staff for UI-created shifts (morning or night) — full local-day availability below. */
   const staffJamie = await prisma.user.upsert({
     where: { email: "jamie@coastaleats.test" },
     update: { name: "Jamie Nguyen" },
@@ -220,6 +236,20 @@ async function main(): Promise<void> {
     },
   });
 
+  /** Weekend-only availability — tests weekday assignment blocks. */
+  const staffEve = await prisma.user.upsert({
+    where: { email: "eve@coastaleats.test" },
+    update: { name: "Eve Weekend" },
+    create: {
+      id: "c0000000-0000-4000-8000-000000000019",
+      email: "eve@coastaleats.test",
+      passwordHash,
+      name: "Eve Weekend",
+      role: "STAFF",
+      desiredHoursWeekly: 20,
+    },
+  });
+
   const staffIds = [
     staffSam.id,
     staffJordan.id,
@@ -230,6 +260,7 @@ async function main(): Promise<void> {
     staffQuinn.id,
     staffTaylor.id,
     staffDrew.id,
+    staffEve.id,
   ];
 
   await prisma.staffSkill.deleteMany({
@@ -248,6 +279,7 @@ async function main(): Promise<void> {
       { userId: staffTaylor.id, skillId: skillServer.id },
       { userId: staffTaylor.id, skillId: skillBar.id },
       { userId: staffDrew.id, skillId: skillLineCook.id },
+      { userId: staffEve.id, skillId: skillServer.id },
     ],
   });
 
@@ -276,6 +308,7 @@ async function main(): Promise<void> {
       { userId: staffTaylor.id, locationId: locNy.id },
       { userId: staffDrew.id, locationId: locSf.id },
       { userId: staffDrew.id, locationId: locLa.id },
+      { userId: staffEve.id, locationId: locSf.id },
     ],
   });
 
@@ -283,25 +316,39 @@ async function main(): Promise<void> {
   await prisma.availabilityRule.deleteMany({
     where: { userId: { in: staffIds } },
   });
-  /** Full local calendar day so early-morning and late-night shifts you add in the UI still pass availability checks. */
   await prisma.availabilityRule.createMany({
-    data: staffIds.flatMap((userId) =>
-      days.map((dayOfWeek) => ({
-        userId,
-        dayOfWeek,
-        startLocalTime: "00:00",
-        endLocalTime: "23:59",
-      })),
-    ),
+    data: staffIds
+      .filter((id) => id !== staffEve.id)
+      .flatMap((userId) =>
+        days.map((dayOfWeek) => ({
+          userId,
+          dayOfWeek,
+          startLocalTime: "00:00",
+          endLocalTime: "23:59",
+        })),
+      ),
+  });
+  /** Eve: Sat + Sun only (DB dayOfWeek: 0=Sun … 6=Sat). */
+  await prisma.availabilityRule.createMany({
+    data: [0, 6].map((dayOfWeek) => ({
+      userId: staffEve.id,
+      dayOfWeek,
+      startLocalTime: "00:00",
+      endLocalTime: "23:59",
+    })),
   });
 
   const zoneSf = locSf.tzIana;
-  const now = DateTime.now().setZone(zoneSf);
-  const weekYear = now.weekYear;
-  const weekNumber = now.weekNumber;
+  const nowInSf = DateTime.now().setZone(zoneSf);
+  const thisWeekMonday = DateTime.fromObject(
+    { weekYear: nowInSf.weekYear, weekNumber: nowInSf.weekNumber },
+    { zone: zoneSf },
+  ).startOf("week");
+  /** Monday of next ISO week (reviewers see data in the upcoming week). */
+  const monSf = thisWeekMonday.plus({ weeks: 1 });
+  const weekYear = monSf.weekYear;
+  const weekNumber = monSf.weekNumber;
   const weekKey = `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
-
-  const monSf = DateTime.fromObject({ weekYear, weekNumber }, { zone: zoneSf }).startOf("week");
 
   const wallUtc = (wall: DateTime): Date => wall.toUTC().toJSDate();
 
@@ -316,20 +363,78 @@ async function main(): Promise<void> {
   const shiftSfBarStart = friSf.set({ hour: 18, minute: 0, second: 0, millisecond: 0 });
   const shiftSfBarEnd = friSf.set({ hour: 23, minute: 0, second: 0, millisecond: 0 });
 
+  const wedSf = monSf.plus({ days: 2 });
   const wedLa = monSf.plus({ days: 2 });
   const shiftLaBarStart = wedLa.set({ hour: 16, minute: 0, second: 0, millisecond: 0 });
   const shiftLaBarEnd = wedLa.set({ hour: 21, minute: 0, second: 0, millisecond: 0 });
+
+  const shiftSfWedDropStart = wedSf.set({ hour: 12, minute: 0, second: 0, millisecond: 0 });
+  const shiftSfWedDropEnd = wedSf.set({ hour: 16, minute: 0, second: 0, millisecond: 0 });
+
+  const thuSf = monSf.plus({ days: 3 });
+  const shiftJamieOverlapAStart = thuSf.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+  const shiftJamieOverlapAEnd = thuSf.set({ hour: 14, minute: 0, second: 0, millisecond: 0 });
+  const shiftJamieOverlapBStart = thuSf.set({ hour: 12, minute: 0, second: 0, millisecond: 0 });
+  const shiftJamieOverlapBEnd = thuSf.set({ hour: 18, minute: 0, second: 0, millisecond: 0 });
+
+  const shiftJamieRestMonStart = monSf.set({ hour: 16, minute: 0, second: 0, millisecond: 0 });
+  const shiftJamieRestMonEnd = monSf.set({ hour: 21, minute: 0, second: 0, millisecond: 0 });
+  const shiftJamieRestTueStart = tueSf.set({ hour: 5, minute: 0, second: 0, millisecond: 0 });
+  const shiftJamieRestTueEnd = tueSf.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+
+  const satSf = monSf.plus({ days: 5 });
+  const shiftSatLongStart = satSf.set({ hour: 8, minute: 0, second: 0, millisecond: 0 });
+  const shiftSatLongEnd = satSf.set({ hour: 21, minute: 0, second: 0, millisecond: 0 });
+
+  const thuLa = monSf.plus({ days: 3 });
+  const shiftLaLineStart = thuLa.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+  const shiftLaLineEnd = thuLa.set({ hour: 18, minute: 0, second: 0, millisecond: 0 });
+
+  const monNy = DateTime.fromObject({ weekYear, weekNumber }, { zone: locNy.tzIana }).startOf("week");
+  const thuNy = monNy.plus({ days: 3 });
+  const shiftNyHostStart = thuNy.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+  const shiftNyHostEnd = thuNy.set({ hour: 14, minute: 0, second: 0, millisecond: 0 });
+  const shiftNyServerStart = thuNy.set({ hour: 14, minute: 0, second: 0, millisecond: 0 });
+  const shiftNyServerEnd = thuNy.set({ hour: 20, minute: 0, second: 0, millisecond: 0 });
 
   const weekStartSf = monSf.toFormat("yyyy-LL-dd");
   const weekStartLa = DateTime.fromObject({ weekYear, weekNumber }, { zone: locLa.tzIana })
     .startOf("week")
     .toFormat("yyyy-LL-dd");
+  const weekStartNy = monNy.toFormat("yyyy-LL-dd");
+
+  await prisma.availabilityException.deleteMany({ where: { userId: staffSam.id } });
+  const samWedBlockStart = wedSf.startOf("day");
+  const samWedBlockEnd = wedSf.endOf("day");
+  await prisma.availabilityException.create({
+    data: {
+      userId: staffSam.id,
+      startAtUtc: wallUtc(samWedBlockStart),
+      endAtUtc: wallUtc(samWedBlockEnd),
+      type: "UNAVAILABLE",
+      tzIana: zoneSf,
+    },
+  });
+
+  await prisma.notification.deleteMany({ where: { type: "SEED_NOTIFICATION" } });
+
+  await prisma.clockInVerificationCode.deleteMany({
+    where: { shiftId: { in: ALL_SHIFT_IDS } },
+  });
+  await prisma.clockSession.deleteMany({
+    where: { shiftId: { in: ALL_SHIFT_IDS } },
+  });
+  await prisma.coverageRequest.deleteMany({
+    where: {
+      OR: [{ shiftId: { in: ALL_SHIFT_IDS } }, { secondShiftId: { in: ALL_SHIFT_IDS } }],
+    },
+  });
 
   await prisma.shiftAssignment.deleteMany({
-    where: { shiftId: { in: Object.values(SHIFT_IDS) } },
+    where: { shiftId: { in: ALL_SHIFT_IDS } },
   });
   await prisma.shift.deleteMany({
-    where: { id: { in: Object.values(SHIFT_IDS) } },
+    where: { id: { in: ALL_SHIFT_IDS } },
   });
 
   await prisma.scheduleWeek.upsert({
@@ -352,6 +457,18 @@ async function main(): Promise<void> {
     create: {
       locationId: locLa.id,
       weekStartDateLocal: weekStartLa,
+      status: "PUBLISHED",
+      cutoffHours: 48,
+    },
+  });
+  await prisma.scheduleWeek.upsert({
+    where: {
+      locationId_weekStartDateLocal: { locationId: locNy.id, weekStartDateLocal: weekStartNy },
+    },
+    update: { status: "PUBLISHED", cutoffHours: 48 },
+    create: {
+      locationId: locNy.id,
+      weekStartDateLocal: weekStartNy,
       status: "PUBLISHED",
       cutoffHours: 48,
     },
@@ -407,40 +524,197 @@ async function main(): Promise<void> {
         weekKey,
         createdById: manager.id,
       },
+      {
+        id: SHIFT_IDS.nyHost,
+        locationId: locNy.id,
+        startAtUtc: wallUtc(shiftNyHostStart),
+        endAtUtc: wallUtc(shiftNyHostEnd),
+        requiredSkillId: skillHost.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.nyServer,
+        locationId: locNy.id,
+        startAtUtc: wallUtc(shiftNyServerStart),
+        endAtUtc: wallUtc(shiftNyServerEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.sfWedDrop,
+        locationId: locSf.id,
+        startAtUtc: wallUtc(shiftSfWedDropStart),
+        endAtUtc: wallUtc(shiftSfWedDropEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.sfJamieOverlapA,
+        locationId: locSf.id,
+        startAtUtc: wallUtc(shiftJamieOverlapAStart),
+        endAtUtc: wallUtc(shiftJamieOverlapAEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.sfJamieOverlapB,
+        locationId: locSf.id,
+        startAtUtc: wallUtc(shiftJamieOverlapBStart),
+        endAtUtc: wallUtc(shiftJamieOverlapBEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.sfJamieRestMon,
+        locationId: locSf.id,
+        startAtUtc: wallUtc(shiftJamieRestMonStart),
+        endAtUtc: wallUtc(shiftJamieRestMonEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.sfJamieRestTue,
+        locationId: locSf.id,
+        startAtUtc: wallUtc(shiftJamieRestTueStart),
+        endAtUtc: wallUtc(shiftJamieRestTueEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.sfSatLongJamie,
+        locationId: locSf.id,
+        startAtUtc: wallUtc(shiftSatLongStart),
+        endAtUtc: wallUtc(shiftSatLongEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.laLineCookThu,
+        locationId: locLa.id,
+        startAtUtc: wallUtc(shiftLaLineStart),
+        endAtUtc: wallUtc(shiftLaLineEnd),
+        requiredSkillId: skillLineCook.id,
+        headcount: 2,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
     ],
   });
+
+  const dropExpires = DateTime.now().plus({ hours: 36 }).toJSDate();
 
   await prisma.shiftAssignment.createMany({
     data: [
       { shiftId: SHIFT_IDS.sfServerPartial, staffUserId: staffSam.id, status: "ASSIGNED" },
       { shiftId: SHIFT_IDS.sfBartenderFull, staffUserId: staffJordan.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfServerDraft, staffUserId: staffPat.id, status: "PROPOSED" },
+      { shiftId: SHIFT_IDS.nyHost, staffUserId: staffQuinn.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.nyServer, staffUserId: staffJamie.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfWedDrop, staffUserId: staffTaylor.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfJamieOverlapA, staffUserId: staffJamie.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfJamieOverlapB, staffUserId: staffJamie.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfJamieRestMon, staffUserId: staffJamie.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfJamieRestTue, staffUserId: staffJamie.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfSatLongJamie, staffUserId: staffJamie.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.laLineCookThu, staffUserId: staffDrew.id, status: "ASSIGNED" },
     ],
   });
 
-  console.log("Seed OK — data matches the current ISO week so Schedule / Assignments show it without changing the week.");
+  await prisma.coverageRequest.createMany({
+    data: [
+      {
+        type: "SWAP",
+        shiftId: SHIFT_IDS.sfServerPartial,
+        secondShiftId: SHIFT_IDS.sfBartenderFull,
+        requesterId: staffSam.id,
+        targetId: staffJordan.id,
+        status: "PENDING",
+      },
+      {
+        type: "DROP",
+        shiftId: SHIFT_IDS.sfWedDrop,
+        secondShiftId: null,
+        requesterId: staffTaylor.id,
+        targetId: null,
+        status: "PENDING",
+        calloutMode: "OPEN",
+        expiresAt: dropExpires,
+      },
+    ],
+  });
+
+  const partialStartUtc = shiftSfPartialStart.toUTC();
+  if (partialStartUtc <= DateTime.utc()) {
+    await prisma.clockSession.create({
+      data: {
+        staffUserId: staffSam.id,
+        shiftId: SHIFT_IDS.sfServerPartial,
+        clockInAtUtc: partialStartUtc.minus({ minutes: 5 }).toJSDate(),
+        clockOutAtUtc: null,
+      },
+    });
+  }
+
+  console.log("Seed OK — next ISO week (Mon–Sun); multi-location + constraint + coverage scenarios.");
   console.log({
     weekKey,
-    weekStartSf,
-    locations: { sf: locSf.name, la: locLa.name },
-    shifts: {
-      sfServerDraft: "DRAFT server SF · headcount 2 · no assignments (assign & publish flow)",
-      sfServerPartial: "PUBLISHED server SF · headcount 2 · Sam assigned (1 open slot)",
-      sfBartenderFull: "PUBLISHED bartender SF · headcount 1 · Jordan assigned (fully staffed)",
-      laBartenderDraft: "DRAFT bartender LA · headcount 1 · no assignment (Riley is eligible in roster)",
+    weekStarts: { sf: weekStartSf, la: weekStartLa, ny: weekStartNy },
+    accounts: {
+      password: "password123",
+      manager: "manager@coastaleats.test (SF+LA+NYC)",
+      admin: "admin@coastaleats.test",
+      staff: "sam@, jordan@, casey@, riley@, jamie@, pat@, quinn@, taylor@, drew@, eve@coastaleats.test",
     },
-    staff: {
-      sam: "server · SF + NYC",
-      jordan: "bartender+server · SF + NYC (no LA)",
-      casey: "server · LA only (not on SF roster)",
-      riley: "bartender · LA only (LA bartender roster)",
-      jamie: "server · SF + LA + NYC",
-      pat: "bartender · SF + LA + NYC",
-      quinn: "host · SF + LA + NYC",
-      taylor: "server+bartender · SF + LA + NYC",
-      drew: "line_cook · SF + LA",
+    scenarios: {
+      sfServerDraft: "DRAFT · Pat PROPOSED (publish / assign flows)",
+      sfServerPartial: "PUBLISHED · Sam ASSIGNED + PENDING SWAP with Jordan’s Fri bar shift",
+      sfBartenderFull: "PUBLISHED premium · Jordan ASSIGNED",
+      laBartenderDraft: "DRAFT LA bartender · Riley eligible",
+      nyHost_nyServer: "NYC Thu · Quinn host + Jamie server",
+      sfWedDrop: "PUBLISHED · Taylor + PENDING DROP (OPEN callout)",
+      jamieOverlap: "Thu · Jamie double-booked (overlap) — constraint: DOUBLE_BOOK",
+      jamieRest: "Mon eve + Tue early · Jamie — constraint: REST_10H",
+      jamieSatLong: "Sat · Jamie 13h single shift — DAILY_HARD_12H / warnings",
+      laLineCookThu: "LA Thu · line cook headcount 2 · Drew assigned (1 open)",
+      samWedOff: "Sam UNAVAILABLE all Wed (SF) — new Wed assignments blocked",
+      eveWeekend: "Eve — server SF cert · availability Sat/Sun only",
+      analytics: "Location default hourly rates + Sam/Jordan wage overrides",
+      clock: "Sam clocked in on Tue partial shift (open session)",
     },
-    accounts:
-      "password123 — manager@… (SF+LA+NYC), sam@…, jordan@…, casey@…, riley@…, jamie@…, pat@…, quinn@…, taylor@…, drew@…",
   });
 }
 

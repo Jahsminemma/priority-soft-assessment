@@ -46,7 +46,9 @@ const ACTION_LABEL: Record<string, string> = {
   "CoverageRequest:ACCEPT": "Swap accepted",
   "CoverageRequest:APPROVE": "Swap approved",
   "CoverageRequest:CANCEL": "Coverage cancelled",
-  "CoverageRequest:CLAIM": "Open shift claimed",
+  "CoverageRequest:CLAIM_OPEN_DROP_PENDING": "Open shift — volunteer (pending manager)",
+  "CoverageRequest:MANAGER_ASSIGN_DROP": "Manager assigned open/drop shift",
+  "CoverageRequest:CLAIM": "Open shift finalized",
   "CoverageRequest:EXPIRE": "Coverage expired",
 };
 

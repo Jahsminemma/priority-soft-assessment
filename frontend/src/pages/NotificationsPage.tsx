@@ -91,8 +91,8 @@ export default function NotificationsPage(): React.ReactElement {
       markResolved(rid);
       setFeedbackModal({
         variant: "success",
-        title: "Shift claimed",
-        message: "You’re assigned to this shift. Others can no longer claim it.",
+        title: "Claim sent for approval",
+        message: "A manager must approve before you’re on the schedule. Watch your notifications.",
       });
       inv();
     },

@@ -155,7 +155,7 @@ coverageRouter.post("/:id/claim", authMiddleware, requireRoles("STAFF"), async (
     res.status(400).json({ error: "Missing id" });
     return;
   }
-  const out = await finalizeDropWithTarget(rid, uid, { id: uid, role: "STAFF" });
+  const out = await acceptCoverageRequest(rid, uid);
   if (!out.ok) {
     const map: Record<string, number> = {
       NOT_PENDING: 409,
@@ -166,6 +166,8 @@ coverageRouter.post("/:id/claim", authMiddleware, requireRoles("STAFF"), async (
       NOT_ELIGIBLE: 400,
       CONSTRAINTS: 400,
       NO_ASSIGNMENT: 409,
+      DIRECTED_USE_ASSIGN: 400,
+      NOT_TARGET: 403,
     };
     sendCoverageFailureJson(res, out, map);
     return;
@@ -239,6 +241,7 @@ coverageRouter.post(
         NO_ASSIGNMENT: 400,
         CONSTRAINTS: 400,
         INVALID: 400,
+        CONFLICT: 409,
       };
       sendCoverageFailureJson(res, out, map);
       return;

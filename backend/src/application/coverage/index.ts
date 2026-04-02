@@ -10,4 +10,4 @@ export {
   listManagerCoverageQueue,
   listOpenCalloutsForStaff,
 } from "./coverage.service.js";
-export type { ManagerCoverageQueueActor, FinalizeDropFailure } from "./coverage.service.js";
+export type { ManagerCoverageQueueActor, FinalizeDropFailure, ClaimOpenDropFailure } from "./coverage.service.js";

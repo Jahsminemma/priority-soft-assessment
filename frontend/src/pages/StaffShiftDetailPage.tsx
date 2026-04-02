@@ -240,7 +240,7 @@ export default function StaffShiftDetailPage(): React.ReactElement {
         open={offerSuccessOpen}
         variant="success"
         title="Offer posted"
-        message="Your shift is offered for pickup. You stay assigned until a manager approves a change. If no one claims it, the offer ends 24 hours before the shift. Watch Notifications for updates."
+        message="Your shift is offered for pickup. You stay assigned until a manager approves whoever volunteers (or assigns someone). Open callouts can expire if no one claims in time. Watch Notifications for updates."
         onClose={() => setOfferSuccessOpen(false)}
       />
       <FeedbackModal
