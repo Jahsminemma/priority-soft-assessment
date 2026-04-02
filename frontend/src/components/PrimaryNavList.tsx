@@ -85,7 +85,7 @@ export function PrimaryNavList({
         <span className={iw}>
           <IconClock />
         </span>
-        <span>Clock & on-duty</span>
+        <span>{isStaff ? "Work history" : "Clock & on-duty"}</span>
       </NavLink>
       <NavLink to="/notifications" onClick={onNavigate} className={linkClass}>
         <span className={`${iw}${unreadNotificationsCount > 0 ? " nav-rail__icon-wrap--with-badge" : ""}`}>

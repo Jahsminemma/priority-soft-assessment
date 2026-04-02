@@ -1,9 +1,51 @@
 import { Router } from "express";
-import { ClockInRequestSchema } from "@shiftsync/shared";
-import { clockIn, clockOut } from "../../application/clock/index.js";
+import { ClockInCodeRequestSchema, ClockInRequestSchema } from "@shiftsync/shared";
+import { clockIn, clockOut, listMyClockSessions, requestClockInCode } from "../../application/clock/index.js";
 import { authMiddleware, requireRoles, type AuthedRequest } from "../middleware/index.js";
 
 export const clockRouter = Router();
+
+clockRouter.get("/my-sessions", authMiddleware, requireRoles("STAFF"), async (req: AuthedRequest, res) => {
+  const uid = req.user?.id;
+  if (!uid) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const rows = await listMyClockSessions(uid);
+  res.json(rows);
+});
+
+clockRouter.post("/request-code", authMiddleware, requireRoles("STAFF"), async (req: AuthedRequest, res) => {
+  const uid = req.user?.id;
+  if (!uid) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const parsed = ClockInCodeRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+  try {
+    const out = await requestClockInCode(uid, parsed.data.shiftId);
+    res.status(201).json(out);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "NOT_ASSIGNED_TO_SHIFT") {
+      res.status(400).json({ error: msg });
+      return;
+    }
+    if (msg === "SHIFT_ENDED") {
+      res.status(400).json({ error: msg });
+      return;
+    }
+    if (msg === "CODE_GENERATION_FAILED") {
+      res.status(503).json({ error: msg });
+      return;
+    }
+    throw e;
+  }
+});
 
 clockRouter.post("/in", authMiddleware, requireRoles("STAFF"), async (req: AuthedRequest, res) => {
   const uid = req.user?.id;

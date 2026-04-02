@@ -505,6 +505,51 @@ body {
   padding: 18px 20px 24px;
 }
 
+/* Real-time: concurrent assignment conflict (socket) */
+.app-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 150;
+  max-width: min(520px, calc(100vw - 32px));
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid rgba(180, 83, 9, 0.35);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+
+.app-toast--warn {
+  background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);
+}
+
+.app-toast__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-toast__title {
+  display: block;
+  font-size: 14px;
+  margin: 0 0 4px;
+  color: #92400e;
+}
+
+.app-toast__text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.app-toast__close {
+  flex-shrink: 0;
+}
+
 /* —— Mobile: hamburger header + dark nav drawer —— */
 .mobile-drawer {
   position: fixed;
@@ -1253,15 +1298,15 @@ body {
 }
 
 .staff-dash__hero-card {
-  display: block;
-  text-decoration: none;
-  color: inherit;
+  display: flex;
+  flex-direction: column;
   border-radius: 18px;
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: 0 8px 28px rgba(15, 23, 42, 0.07);
   transition: transform 0.08s ease, box-shadow 0.12s ease;
   -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
 }
 
 .staff-dash__hero-card:hover {
@@ -1270,6 +1315,54 @@ body {
 
 .staff-dash__hero-card:active {
   transform: scale(0.99);
+}
+
+.staff-dash__hero-card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.staff-dash__hero-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.staff-dash__hero-code-hint {
+  margin: 0;
+  flex: 1 1 160px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.staff-dash__hero-code-err {
+  margin: 0;
+  padding: 0 18px 12px;
+  font-size: 13px;
+}
+
+.staff-dash__clock-code-modal .feedback-modal__message {
+  margin-bottom: 4px;
+}
+
+.staff-dash__clock-code-value {
+  margin: 0 0 12px;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-align: center;
+}
+
+.staff-dash__clock-code-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 12px;
 }
 
 .staff-dash__hero-card-inner {

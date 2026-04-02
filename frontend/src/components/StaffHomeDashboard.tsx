@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
@@ -10,6 +11,7 @@ import {
   fetchOpenCallouts,
   fetchShiftsStaff,
   fetchSkills,
+  requestClockInCode,
 } from "../api.js";
 import {
   formatFullCalendarDateInZone,
@@ -35,6 +37,8 @@ function IconChevronRight(): React.ReactElement {
 
 export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps): React.ReactElement {
   const queryClient = useQueryClient();
+  const [clockCodeResult, setClockCodeResult] = useState<{ code: string; expiresAtUtc: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const weekKey = useMemo(() => normalizeIsoWeekKey(initialWeekKeyFromToday()), []);
   const nextWeekKey = useMemo(() => shiftWeekKey(weekKey, 1), [weekKey]);
 
@@ -86,6 +90,28 @@ export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps)
       void queryClient.invalidateQueries({ queryKey: ["notifications"] });
     },
   });
+
+  const clockCodeMut = useMutation({
+    mutationFn: (shiftId: string) => requestClockInCode(token, shiftId),
+    onSuccess: (data) => {
+      setClockCodeResult(data);
+      setCopied(false);
+    },
+  });
+
+  useEffect(() => {
+    if (!clockCodeResult) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setClockCodeResult(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [clockCodeResult]);
 
   const locById = useMemo(
     () => new Map((locationsQuery.data ?? []).map((l) => [l.id, l])),
@@ -204,21 +230,86 @@ export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps)
       {error ? <p className="text-error">We couldn’t load your shifts. Try again.</p> : null}
 
       {!loading && !error && heroShift && heroLoc ? (
-        <Link to={`/my-shifts/${heroShift.id}`} className="staff-dash__hero-card">
-          <div className="staff-dash__hero-card-inner">
-            <p className="staff-dash__hero-time">{formatShiftWallTimeArrow(heroShift.startAtUtc, heroShift.endAtUtc, heroLoc.tzIana)}</p>
-            <p className="staff-dash__hero-duration">{formatShiftDurationHuman(heroShift.startAtUtc, heroShift.endAtUtc)}</p>
-            <p className="staff-dash__hero-date">{formatFullCalendarDateInZone(heroShift.startAtUtc, heroLoc.tzIana)}</p>
-            <div className="staff-dash__hero-loc">
-              <span className="staff-dash__dot" aria-hidden />
-              <span>
-                {heroLoc.name}
-                {heroSkill ? ` · ${heroSkill}` : ""}
-              </span>
+        <>
+          <div className="staff-dash__hero-card">
+            <Link to={`/my-shifts/${heroShift.id}`} className="staff-dash__hero-card-link">
+              <div className="staff-dash__hero-card-inner">
+                <p className="staff-dash__hero-time">{formatShiftWallTimeArrow(heroShift.startAtUtc, heroShift.endAtUtc, heroLoc.tzIana)}</p>
+                <p className="staff-dash__hero-duration">{formatShiftDurationHuman(heroShift.startAtUtc, heroShift.endAtUtc)}</p>
+                <p className="staff-dash__hero-date">{formatFullCalendarDateInZone(heroShift.startAtUtc, heroLoc.tzIana)}</p>
+                <div className="staff-dash__hero-loc">
+                  <span className="staff-dash__dot" aria-hidden />
+                  <span>
+                    {heroLoc.name}
+                    {heroSkill ? ` · ${heroSkill}` : ""}
+                  </span>
+                </div>
+                <span className="staff-dash__hero-cta">View shift details</span>
+              </div>
+            </Link>
+            <div className="staff-dash__hero-card-actions">
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                disabled={clockCodeMut.isPending}
+                onClick={() => void clockCodeMut.mutateAsync(heroShift.id)}
+              >
+                {clockCodeMut.isPending ? "…" : "Clock in"}
+              </button>
+              <p className="staff-dash__hero-code-hint muted">Show the code to your manager to verify your punch.</p>
             </div>
-            <span className="staff-dash__hero-cta">View shift details</span>
+            {clockCodeMut.isError ? (
+              <p className="staff-dash__hero-code-err text-error">{(clockCodeMut.error as Error).message}</p>
+            ) : null}
           </div>
-        </Link>
+          {clockCodeResult
+            ? createPortal(
+                <div className="feedback-modal-root">
+                  <div className="feedback-modal-backdrop" aria-hidden onClick={() => setClockCodeResult(null)} />
+                  <div
+                    className="feedback-modal staff-dash__clock-code-modal"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="staff-clock-code-title"
+                  >
+                    <h2 id="staff-clock-code-title" className="feedback-modal__title">
+                      Your clock-in code
+                    </h2>
+                    <p className="staff-dash__clock-code-value mono" aria-live="polite">
+                      {clockCodeResult.code}
+                    </p>
+                    <p className="feedback-modal__message muted">
+                      {(() => {
+                        const exp = DateTime.fromISO(clockCodeResult.expiresAtUtc, { zone: "utc" }).toLocal();
+                        return exp.isValid ? `Expires ${exp.toFormat("h:mm a")} local time.` : "";
+                      })()}
+                    </p>
+                    <div className="staff-dash__clock-code-btns">
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(clockCodeResult.code);
+                            setCopied(true);
+                            window.setTimeout(() => setCopied(false), 2000);
+                          } catch {
+                            /* ignore */
+                          }
+                        }}
+                      >
+                        {copied ? "Copied" : "Copy code"}
+                      </button>
+                      <button type="button" className="btn btn--primary" onClick={() => setClockCodeResult(null)}>
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
+        </>
       ) : null}
 
       {!loading && !error && !heroShift ? (
@@ -278,7 +369,7 @@ export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps)
           Full schedule
         </Link>
         <Link to="/clock" className="staff-dash__quick-link">
-          Time clock
+          Work history
         </Link>
       </section>
     </div>

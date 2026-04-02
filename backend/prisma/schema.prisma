@@ -82,6 +82,7 @@ model User {
   notifications      Notification[]
   auditLogs          AuditLog[] @relation("Actor")
   clockSessions      ClockSession[]
+  clockInVerificationCodes ClockInVerificationCode[]
   registrationInvitesCreated RegistrationInvite[] @relation("RegistrationInvitesCreated")
 }
 
@@ -206,6 +207,7 @@ model Shift {
   coverageRequestsPrimary  CoverageRequest[] @relation("CoveragePrimaryShift")
   coverageRequestsSecond   CoverageRequest[] @relation("CoverageSecondShift")
   clockSessions            ClockSession[]
+  clockInVerificationCodes ClockInVerificationCode[]
 }
 
 model ShiftAssignment {
@@ -273,6 +275,21 @@ model ClockSession {
   clockOutAtUtc  DateTime?
   staff          User      @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
   shift          Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+}
+
+/** Short-lived code staff shows to a manager to verify clock-in (consumed when manager confirms). */
+model ClockInVerificationCode {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  staffUserId String
+  shiftId     String
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  consumedAt  DateTime?
+  staff       User      @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+  shift       Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([staffUserId, shiftId])
 }
 
 model IdempotencyKey {

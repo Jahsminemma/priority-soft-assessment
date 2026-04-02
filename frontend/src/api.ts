@@ -41,6 +41,9 @@ import {
   WeekScheduleStateResponseSchema,
   EMERGENCY_OVERRIDE_MIN_LEN,
   type OvertimeCostWeekResponse,
+  ClockSessionHistoryRowSchema,
+  ClockInCodeResponseSchema,
+  type ClockSessionHistoryRow,
 } from "@shiftsync/shared";
 
 const base = import.meta.env.VITE_API_URL ?? "";
@@ -631,6 +634,39 @@ export async function clockOut(token: string): Promise<{ sessionId: string }> {
     );
   }
   return (await res.json()) as { sessionId: string };
+}
+
+export async function fetchMyClockSessions(token: string): Promise<ClockSessionHistoryRow[]> {
+  const res = await fetch(`${base}/api/clock/my-sessions`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Work history failed");
+  const data: unknown = await res.json();
+  return z.array(ClockSessionHistoryRowSchema).parse(data);
+}
+
+export async function requestClockInCode(
+  token: string,
+  shiftId: string,
+): Promise<{ code: string; expiresAtUtc: string }> {
+  const res = await fetch(`${base}/api/clock/request-code`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ shiftId }),
+  });
+  if (!res.ok) {
+    const err: unknown = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof err === "object" && err !== null && "error" in err
+        ? String((err as { error: unknown }).error)
+        : "Could not create clock-in code",
+    );
+  }
+  const data: unknown = await res.json();
+  return ClockInCodeResponseSchema.parse(data);
 }
 
 const OnDutyRowSchema = z.object({

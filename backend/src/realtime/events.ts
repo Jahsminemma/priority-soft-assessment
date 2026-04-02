@@ -26,7 +26,7 @@ export function emitAssignmentChanged(
 
 export function emitAssignmentConflict(
   locationId: string,
-  payload: { shiftId: string; message: string },
+  payload: { shiftId: string; message: string; rejectedUserId?: string },
 ): void {
   const s = getIo();
   if (!s) return;
