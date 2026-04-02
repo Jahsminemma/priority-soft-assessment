@@ -37,6 +37,11 @@ export const WeekScheduleStateResponseSchema = z.object({
   weekRowStatus: z.enum(["NONE", "DRAFT", "PUBLISHED"]),
   /** True if any published shift in this week is past the per-shift edit deadline (now > start − cutoff). */
   anyShiftLocked: z.boolean(),
+  /**
+   * True when this week is already published and nothing has changed since the last publish
+   * (no shift/assignment edits tracked). Unpublishing or making changes enables publish again.
+   */
+  publishDisabled: z.boolean(),
 });
 
 export type WeekScheduleStateResponse = z.infer<typeof WeekScheduleStateResponseSchema>;

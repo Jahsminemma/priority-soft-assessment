@@ -69,6 +69,7 @@ shiftsRouter.get(
     res.json({
       candidates: out.candidates,
       hasPendingSwapRequest: out.hasPendingSwapRequest,
+      locationTzIana: out.locationTzIana,
     });
   },
 );

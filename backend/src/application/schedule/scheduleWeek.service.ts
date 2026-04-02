@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { isValidEmergencyOverrideReason, isoWeekKeyDbVariants, normalizeIsoWeekKey } from "@shiftsync/shared";
+import { DateTime } from "luxon";
 import { weekStartDateLocalFromWeekKey } from "../../domain/scheduling/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
 import { emitScheduleWeekUpdated } from "../../realtime/events.js";
@@ -24,15 +25,40 @@ export async function publishWeek(
   const cutoff = cutoffHours ?? 48;
 
   await prisma.$transaction(async (tx) => {
-    await tx.scheduleWeek.upsert({
+    const existing = await tx.scheduleWeek.findUnique({
       where: { locationId_weekStartDateLocal: { locationId, weekStartDateLocal } },
-      create: { locationId, weekStartDateLocal, status: "PUBLISHED", cutoffHours: cutoff },
-      update: { status: "PUBLISHED", cutoffHours: cutoff },
     });
+    if (
+      existing?.status === "PUBLISHED" &&
+      existing.scheduleContentRevision === existing.publishedContentRevision
+    ) {
+      throw new Error("PUBLISH_NOTHING_NEW");
+    }
     await tx.shift.updateMany({
       where: { locationId, weekKey: { in: isoWeekKeyDbVariants(weekKeyNorm) } },
       data: { status: "PUBLISHED" },
     });
+    if (existing) {
+      await tx.scheduleWeek.update({
+        where: { id: existing.id },
+        data: {
+          status: "PUBLISHED",
+          cutoffHours: cutoff,
+          publishedContentRevision: existing.scheduleContentRevision,
+        },
+      });
+    } else {
+      await tx.scheduleWeek.create({
+        data: {
+          locationId,
+          weekStartDateLocal,
+          status: "PUBLISHED",
+          cutoffHours: cutoff,
+          scheduleContentRevision: 0,
+          publishedContentRevision: 0,
+        },
+      });
+    }
     await tx.auditLog.create({
       data: {
         actorUserId: actor.id,
@@ -84,6 +110,7 @@ export async function getWeekScheduleState(
   cutoffHours: number;
   weekRowStatus: "NONE" | "DRAFT" | "PUBLISHED";
   anyShiftLocked: boolean;
+  publishDisabled: boolean;
 } | null> {
   if (!canManageLocation(actor, locationId)) {
     return null;
@@ -106,17 +133,30 @@ export async function getWeekScheduleState(
   /** When the week row is published, evaluate cutoff against every shift in the week (not only status=PUBLISHED) so we never miss rows due to weekKey/status drift. */
   let anyShiftLocked = false;
   if (sw?.status === "PUBLISHED") {
-    const shiftsInWeek = await prisma.shift.findMany({
+    const shiftsCandidates = await prisma.shift.findMany({
       where: {
         locationId,
         weekKey: { in: isoWeekKeyDbVariants(weekKeyNorm) },
       },
       select: { startAtUtc: true },
     });
-    anyShiftLocked = anyShiftPastCutoff(cutoffHours, shiftsInWeek);
+    if (shiftsCandidates.length > 0) {
+      const weekStartAtLocal = DateTime.fromISO(`${weekStartDateLocal}T00:00:00`, { zone: location.tzIana });
+      const weekEndExclusive = weekStartAtLocal.plus({ days: 7 });
+      const shiftsInActualWeek = shiftsCandidates.filter((s) => {
+        const localStart = DateTime.fromJSDate(s.startAtUtc).setZone(location.tzIana);
+        return localStart >= weekStartAtLocal && localStart < weekEndExclusive;
+      });
+      anyShiftLocked = anyShiftPastCutoff(cutoffHours, shiftsInActualWeek);
+    }
   }
 
-  return { weekKey: weekKeyNorm, cutoffHours, weekRowStatus, anyShiftLocked };
+  const publishDisabled =
+    sw != null &&
+    sw.status === "PUBLISHED" &&
+    sw.scheduleContentRevision === sw.publishedContentRevision;
+
+  return { weekKey: weekKeyNorm, cutoffHours, weekRowStatus, anyShiftLocked, publishDisabled };
 }
 
 export async function unpublishWeek(
@@ -139,14 +179,20 @@ export async function unpublishWeek(
   const cutoffHours = sw?.cutoffHours ?? 48;
 
   if (sw?.status === "PUBLISHED") {
-    const shiftsInWeek = await prisma.shift.findMany({
+    const shiftsCandidates = await prisma.shift.findMany({
       where: {
         locationId,
         weekKey: { in: isoWeekKeyDbVariants(weekKeyNorm) },
       },
       select: { startAtUtc: true },
     });
-    if (unpublishBlockedForActor(actor, cutoffHours, shiftsInWeek, opts?.emergencyOverrideReason)) {
+    const weekStartAtLocal = DateTime.fromISO(`${weekStartDateLocal}T00:00:00`, { zone: location.tzIana });
+    const weekEndExclusive = weekStartAtLocal.plus({ days: 7 });
+    const shiftsInActualWeek = shiftsCandidates.filter((s) => {
+      const localStart = DateTime.fromJSDate(s.startAtUtc).setZone(location.tzIana);
+      return localStart >= weekStartAtLocal && localStart < weekEndExclusive;
+    });
+    if (unpublishBlockedForActor(actor, cutoffHours, shiftsInActualWeek, opts?.emergencyOverrideReason)) {
       throw new Error("PAST_CUTOFF");
     }
   }

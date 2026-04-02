@@ -41,10 +41,6 @@ coverageRouter.post("/", authMiddleware, requireRoles("STAFF"), async (req: Auth
       res.status(400).json({ error: "Invalid target" });
       return;
     }
-    if (msg === "SWAP_DIFFERENT_LOCATIONS") {
-      res.status(400).json({ error: "Two-way swap requires both shifts at the same location" });
-      return;
-    }
     if (msg === "TARGET_NOT_ON_SECOND_SHIFT") {
       res.status(400).json({ error: "Target must be assigned to secondShiftId for a two-way swap" });
       return;

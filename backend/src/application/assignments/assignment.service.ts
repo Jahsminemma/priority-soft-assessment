@@ -12,6 +12,7 @@ import {
   type ShiftIntervalInput,
 } from "../../domain/scheduling/index.js";
 import { prisma } from "../../infrastructure/persistence/index.js";
+import { bumpScheduleContentRevision } from "../schedule/scheduleRevision.js";
 import { emitAssignmentChanged, emitAssignmentConflict } from "../../realtime/events.js";
 import { canModifyShift } from "../shifts/shift.service.js";
 import { createNotification } from "../notifications/notification.service.js";
@@ -124,7 +125,7 @@ export async function removeAssignment(
 ): Promise<{ ok: true } | { ok: false; reason: "NOT_FOUND" | "FORBIDDEN" | "PAST_CUTOFF" }> {
   const row = await prisma.shiftAssignment.findUnique({
     where: { id: assignmentId },
-    include: { shift: { select: { id: true, locationId: true } } },
+    include: { shift: { select: { id: true, locationId: true, weekKey: true } } },
   });
   if (!row) return { ok: false, reason: "NOT_FOUND" };
 
@@ -152,6 +153,8 @@ export async function removeAssignment(
     staffUserId: row.staffUserId,
     assignmentId,
   });
+
+  await bumpScheduleContentRevision(row.shift.locationId, row.shift.weekKey);
 
   return { ok: true };
 }
@@ -297,6 +300,7 @@ export async function commitAssignment(
       staffUserId,
       assignmentId: result.id,
     });
+    await bumpScheduleContentRevision(shiftRow.locationId, shiftRow.weekKey);
 
     const weekStartDateLocal = weekStartDateLocalFromWeekKey(shiftRow.weekKey, shiftRow.location.tzIana);
     const scheduleWeek = await prisma.scheduleWeek.findUnique({
@@ -428,13 +432,15 @@ export type SwapPairCandidate = {
   theirShiftSkillName: string;
   theirShiftStartAtUtc: string;
   theirShiftEndAtUtc: string;
+  theirShiftLocationName: string;
+  theirShiftLocationTzIana: string;
 };
 
 /**
- * True two-way swap options: another staff member who already holds a published shift at the same
- * location in the same schedule week, where (1) they could take your shift and (2) you could take
- * theirs, with no hard constraint violations either way (skills, site cert, availability, rest,
- * overlaps, unavailable/leave exceptions). Coworkers on the same shift are excluded.
+ * True two-way swap options: another staff member who holds a published shift in the same schedule
+ * week (any site you both may work per constraints), where (1) they could take your shift and (2)
+ * you could take theirs, with no hard constraint violations either way (skills, site cert,
+ * availability, rest, overlaps, unavailable/leave exceptions). Coworkers on the same shift are excluded.
  */
 export async function listSwapCandidatesForAssignedStaff(
   actor: AuthedUser,
@@ -487,7 +493,6 @@ export async function listSwapCandidatesForAssignedStaff(
       staffUserId: { not: actor.id },
       status: "ASSIGNED",
       shift: {
-        locationId: shift.locationId,
         weekKey: { in: weekKeys },
         id: { not: shiftId },
         status: "PUBLISHED",
@@ -519,8 +524,9 @@ export async function listSwapCandidatesForAssignedStaff(
       theirShiftSkillName: theirShift.requiredSkill.name,
       theirShiftStartAtUtc: theirShift.startAtUtc.toISOString(),
       theirShiftEndAtUtc: theirShift.endAtUtc.toISOString(),
+      theirShiftLocationName: theirShift.location.name,
+      theirShiftLocationTzIana: theirShift.location.tzIana,
     });
-    if (out.length >= SWAP_PAIR_LIMIT) break;
   }
 
   out.sort((a, b) => {
@@ -530,7 +536,7 @@ export async function listSwapCandidatesForAssignedStaff(
 
   return {
     ok: true,
-    candidates: out,
+    candidates: out.slice(0, SWAP_PAIR_LIMIT),
     hasPendingSwapRequest,
     locationTzIana: shift.location.tzIana,
   };

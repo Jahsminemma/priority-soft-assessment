@@ -13,6 +13,7 @@ type MobileNavDrawerProps = {
   isStaff: boolean;
   isAdmin: boolean;
   onSignOut: () => void;
+  unreadNotificationsCount?: number;
 };
 
 const drawerLinkClass = ({ isActive }: { isActive: boolean }): string =>
@@ -28,6 +29,7 @@ export function MobileNavDrawer({
   isStaff,
   isAdmin,
   onSignOut,
+  unreadNotificationsCount = 0,
 }: MobileNavDrawerProps): React.ReactElement {
   const location = useLocation();
   const close = useCallback(() => {
@@ -88,6 +90,7 @@ export function MobileNavDrawer({
             canManage={canManage}
             isStaff={isStaff}
             isAdmin={isAdmin}
+            unreadNotificationsCount={unreadNotificationsCount}
           />
         </nav>
 

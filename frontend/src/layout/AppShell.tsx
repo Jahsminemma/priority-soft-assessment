@@ -6,6 +6,8 @@ import { PrimaryNavList } from "../components/PrimaryNavList.js";
 import { useAuth } from "../context/AuthContext.js";
 import { useSocketSync } from "../hooks/useSocketSync.js";
 import { roleLabel, userInitial } from "../utils/navUser.js";
+import { useQuery } from "@tanstack/react-query";
+import { fetchNotifications } from "../api.js";
 
 const sidebarLinkClass = ({ isActive }: { isActive: boolean }): string =>
   `nav-rail__link${isActive ? " nav-rail__link--active" : ""}`;
@@ -32,7 +34,7 @@ function IconBellHeader(): React.ReactElement {
 }
 
 export function AppShell(): React.ReactElement {
-  const { user, logout } = useAuth();
+  const { user, logout, token } = useAuth();
   useSocketSync();
   const location = useLocation();
   const navigate = useNavigate();
@@ -43,6 +45,17 @@ export function AppShell(): React.ReactElement {
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
   const isStaff = user?.role === "STAFF";
   const isAdmin = user?.role === "ADMIN";
+
+  const unreadCount = useQuery({
+    queryKey: ["notifications", token],
+    queryFn: () => fetchNotifications(token!),
+    enabled: Boolean(token),
+    // Keep UI snappy; also driven by socket invalidations on new notifications.
+    staleTime: 10_000,
+    retry: false,
+  });
+  const unreadNotificationsCount = (unreadCount.data ?? []).filter((n) => !n.readAt).length;
+  const badgeCount = unreadNotificationsCount > 99 ? "99+" : String(unreadNotificationsCount);
 
   const signOut = (): void => {
     logout();
@@ -69,6 +82,7 @@ export function AppShell(): React.ReactElement {
               canManage={canManage}
               isStaff={isStaff}
               isAdmin={isAdmin}
+              unreadNotificationsCount={unreadNotificationsCount}
             />
           </nav>
 
@@ -109,7 +123,14 @@ export function AppShell(): React.ReactElement {
               aria-label="Notifications"
               onClick={closeMobileNav}
             >
-              <IconBellHeader />
+              <span className="app-shell__bell-badge-wrap">
+                <IconBellHeader />
+                {unreadNotificationsCount > 0 ? (
+                  <span className="app-shell__bell-badge" aria-hidden title="Unread notifications">
+                    {badgeCount}
+                  </span>
+                ) : null}
+              </span>
             </NavLink>
             <div className="app-shell__header-actions app-shell__header-actions--desktop">
               <div className="app-shell__user">
@@ -137,6 +158,7 @@ export function AppShell(): React.ReactElement {
         isStaff={isStaff}
         isAdmin={isAdmin}
         onSignOut={signOut}
+        unreadNotificationsCount={unreadNotificationsCount}
       />
     </div>
   );

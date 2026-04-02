@@ -169,6 +169,10 @@ model ScheduleWeek {
   weekStartDateLocal String
   status           ScheduleWeekStatus @default(DRAFT)
   cutoffHours      Int                @default(48)
+  /** Bumped when shifts or assignments change after the week row exists (republish needed when published). */
+  scheduleContentRevision  Int @default(0)
+  /** Snapshot of scheduleContentRevision at last successful publish. */
+  publishedContentRevision Int @default(0)
   location         Location           @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   @@unique([locationId, weekStartDateLocal])

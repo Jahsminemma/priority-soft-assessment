@@ -19,6 +19,7 @@ import { prisma } from "../../infrastructure/persistence/index.js";
 import { emitShiftUpdated } from "../../realtime/events.js";
 import { canManageLocation, type AuthedUser } from "../../security/index.js";
 import { cancelCoverageForShift } from "../coverage/index.js";
+import { bumpScheduleContentRevision } from "../schedule/scheduleRevision.js";
 
 export async function listShiftsByLocationWeek(
   actor: AuthedUser,
@@ -235,6 +236,7 @@ export async function createShift(actor: AuthedUser, input: CreateShiftRequest):
   });
 
   emitShiftUpdated(created.locationId, { shiftId: created.id, action: "created" });
+  await bumpScheduleContentRevision(created.locationId, created.weekKey);
   return shiftRecordToDto(created);
 }
 
@@ -322,6 +324,7 @@ export async function updateShift(
 
   await cancelCoverageForShift(shiftId, actor.id);
   emitShiftUpdated(updated.locationId, { shiftId, action: "updated" });
+  await bumpScheduleContentRevision(updated.locationId, updated.weekKey);
   return shiftRecordToDto(updated);
 }
 
@@ -341,6 +344,8 @@ export async function deleteShift(
   if (!existing) return { error: "NOT_FOUND" };
 
   await cancelCoverageForShift(shiftId, actor.id);
+
+  await bumpScheduleContentRevision(existing.locationId, existing.weekKey);
 
   await prisma.$transaction(async (tx) => {
     await tx.shift.delete({ where: { id: shiftId } });

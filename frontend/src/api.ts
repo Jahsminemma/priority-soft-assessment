@@ -224,6 +224,8 @@ const SwapCandidateRowSchema = z.object({
   theirShiftSkillName: z.string(),
   theirShiftStartAtUtc: z.string(),
   theirShiftEndAtUtc: z.string(),
+  theirShiftLocationName: z.string(),
+  theirShiftLocationTzIana: z.string(),
 });
 
 const SwapCandidatesResponseSchema = z.object({

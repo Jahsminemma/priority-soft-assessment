@@ -248,10 +248,20 @@ export function evaluateAssignmentConstraints(
 
   const allShifts: ShiftIntervalInput[] = [...ctx.otherAssignments, shift];
   const dailyMinutes = computeDailyMinutesInTz(allShifts, shift.locationTzIana);
+  // "Long day" warnings should correspond to the week currently being scheduled.
+  // Without this, shifts in adjacent weeks (or overnight shifts spilling into the prior/next day)
+  // can produce warnings on days outside the user’s current schedule week view.
+  const anchor = DateTime.fromJSDate(shift.startAtUtc, { zone: "utc" }).setZone(shift.locationTzIana);
+  const weekStart = anchor.startOf("week");
+  const allowedDayKeys = new Set<string>();
+  for (let i = 0; i < 7; i++) {
+    allowedDayKeys.add(weekStart.plus({ days: i }).toFormat("yyyy-LL-dd"));
+  }
   let hasDailyHard = false;
   let maxDailyWarnMinutes = 0;
   let maxDailyWarnKey = "";
   for (const [dayKey, minutes] of dailyMinutes) {
+    if (!allowedDayKeys.has(dayKey)) continue;
     if (minutes > 12 * 60) {
       hard.push({
         code: "DAILY_HARD_12H",

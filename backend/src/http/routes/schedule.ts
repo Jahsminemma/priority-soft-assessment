@@ -75,6 +75,13 @@ scheduleRouter.post(
         res.status(400).json({ error: "Invalid weekKey (use e.g. 2026-W09)" });
         return;
       }
+      if (msg === "PUBLISH_NOTHING_NEW") {
+        res.status(400).json({
+          error:
+            "This week is already published with no tracked changes. Edit the schedule or unpublish before publishing again.",
+        });
+        return;
+      }
       throw e;
     }
   },
