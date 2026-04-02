@@ -97,6 +97,150 @@ export async function listMyClockSessions(staffUserId: string): Promise<ClockSes
   }));
 }
 
+/** Normalize to exactly 6 digits, or null. */
+export function normalizeClockCodeInput(raw: string): string | null {
+  const digits = raw.replace(/\D/g, "");
+  return digits.length === 6 ? digits : null;
+}
+
+export type ClockCodePreviewResult = {
+  staff: { id: string; name: string; email: string };
+  shift: { id: string; startAtUtc: string; endAtUtc: string };
+  location: { id: string; name: string; tzIana: string };
+  skillName: string;
+  expiresAtUtc: string;
+  /** Non-null when the manager may want extra care (e.g. shift at a site they don’t manage). */
+  managerLocationWarning: string | null;
+  shiftLocationId: string;
+};
+
+function managerLocationWarning(args: {
+  managerRole: "ADMIN" | "MANAGER";
+  managerLocationIds: string[];
+  shiftLocationId: string;
+  shiftLocationName: string;
+}): string | null {
+  if (args.managerRole === "ADMIN") return null;
+  if (args.managerLocationIds.includes(args.shiftLocationId)) return null;
+  if (args.managerLocationIds.length === 0) {
+    return `This shift is at ${args.shiftLocationName}, but you have no locations assigned on your profile. Approve only if your organization allows it.`;
+  }
+  return `This shift is at ${args.shiftLocationName}, which is not in your assigned locations. You can still approve remote verification or coverage — confirm this matches your policy.`;
+}
+
+async function loadCodeRowForLookup(code: string) {
+  return prisma.clockInVerificationCode.findUnique({
+    where: { code },
+    include: {
+      staff: { select: { id: true, name: true, email: true } },
+      shift: {
+        include: {
+          location: { select: { id: true, name: true, tzIana: true } },
+          requiredSkill: { select: { name: true } },
+        },
+      },
+    },
+  });
+}
+
+export async function previewClockInCode(
+  rawCode: string,
+  managerRole: "ADMIN" | "MANAGER",
+  managerLocationIds: string[],
+): Promise<ClockCodePreviewResult> {
+  const code = normalizeClockCodeInput(rawCode);
+  if (!code) throw new Error("INVALID_CODE");
+
+  const row = await loadCodeRowForLookup(code);
+  if (!row) throw new Error("CODE_NOT_FOUND");
+
+  const now = new Date();
+  if (row.consumedAt) throw new Error("CODE_ALREADY_USED");
+  if (now > row.expiresAt) throw new Error("CODE_EXPIRED");
+
+  const loc = row.shift.location;
+  const warning = managerLocationWarning({
+    managerRole,
+    managerLocationIds,
+    shiftLocationId: loc.id,
+    shiftLocationName: loc.name,
+  });
+
+  return {
+    staff: {
+      id: row.staff.id,
+      name: row.staff.name,
+      email: row.staff.email,
+    },
+    shift: {
+      id: row.shift.id,
+      startAtUtc: row.shift.startAtUtc.toISOString(),
+      endAtUtc: row.shift.endAtUtc.toISOString(),
+    },
+    location: {
+      id: loc.id,
+      name: loc.name,
+      tzIana: loc.tzIana,
+    },
+    skillName: row.shift.requiredSkill.name,
+    expiresAtUtc: row.expiresAt.toISOString(),
+    managerLocationWarning: warning,
+    shiftLocationId: loc.id,
+  };
+}
+
+export async function approveClockInCode(rawCode: string, managerUserId: string): Promise<{ sessionId: string }> {
+  const code = normalizeClockCodeInput(rawCode);
+  if (!code) throw new Error("INVALID_CODE");
+
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.clockInVerificationCode.findUnique({
+      where: { code },
+      include: {
+        shift: { include: { location: true } },
+      },
+    });
+    if (!row) throw new Error("CODE_NOT_FOUND");
+
+    const now = new Date();
+    if (row.consumedAt) throw new Error("CODE_ALREADY_USED");
+    if (now > row.expiresAt) throw new Error("CODE_EXPIRED");
+
+    const assignment = await tx.shiftAssignment.findFirst({
+      where: { shiftId: row.shiftId, staffUserId: row.staffUserId, status: "ASSIGNED" },
+      include: { shift: true },
+    });
+    if (!assignment) throw new Error("NOT_ASSIGNED_TO_SHIFT");
+
+    const { shift } = assignment;
+    if (now > shift.endAtUtc) throw new Error("SHIFT_ENDED");
+
+    const open = await tx.clockSession.findFirst({
+      where: { staffUserId: row.staffUserId, clockOutAtUtc: null },
+    });
+    if (open) throw new Error("ALREADY_CLOCKED_IN");
+
+    const session = await tx.clockSession.create({
+      data: {
+        staffUserId: row.staffUserId,
+        shiftId: row.shiftId,
+        clockInAtUtc: now,
+      },
+    });
+
+    await tx.clockInVerificationCode.update({
+      where: { id: row.id },
+      data: {
+        consumedAt: now,
+        verifiedByUserId: managerUserId,
+      },
+    });
+
+    emitPresenceOnDutyUpdated(shift.locationId, { locationId: shift.locationId });
+    return { sessionId: session.id };
+  });
+}
+
 export async function requestClockInCode(
   staffUserId: string,
   shiftId: string,

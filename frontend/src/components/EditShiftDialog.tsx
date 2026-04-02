@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState, type ReactElement } from "react";
+import { Link } from "react-router-dom";
 import { DateTime } from "luxon";
 import { EMERGENCY_OVERRIDE_MIN_LEN, type LocationSummary, type ShiftDto } from "@shiftsync/shared";
 import { ShiftTimeRangeFields } from "./ShiftTimeRangeFields.js";
@@ -207,6 +208,12 @@ export function EditShiftDialog({
               />
               <span className="muted small">This shift is within the schedule edit cutoff; changes need a documented reason.</span>
             </label>
+          ) : null}
+
+          {shift ? (
+            <p className="muted small edit-shift-dialog__audit">
+              <Link to={`/admin/audit?shiftId=${encodeURIComponent(shift.id)}`}>Audit trail for this shift</Link>
+            </p>
           ) : null}
 
           <div className="btn-row btn-row--single">

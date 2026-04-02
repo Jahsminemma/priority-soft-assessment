@@ -4,6 +4,7 @@ import {
   IconBell,
   IconCalendar,
   IconChart,
+  IconClipboard,
   IconClock,
   IconGrid,
   IconSettings,
@@ -62,6 +63,12 @@ export function PrimaryNavList({
               <IconChart />
             </span>
             <span>Schedule analytics</span>
+          </NavLink>
+          <NavLink to="/admin/audit" onClick={onNavigate} className={linkClass}>
+            <span className={iw}>
+              <IconClipboard />
+            </span>
+            <span>Audit trail</span>
           </NavLink>
         </>
       ) : null}

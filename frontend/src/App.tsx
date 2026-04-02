@@ -13,6 +13,7 @@ import SettingsPage from "./pages/SettingsPage.js";
 import AvailabilityPage from "./pages/AvailabilityPage.js";
 import RegisterPage from "./pages/RegisterPage.js";
 import TeamPage from "./pages/TeamPage.js";
+import AuditTrailPage from "./pages/AuditTrailPage.js";
 
 function ProtectedLayout(): React.ReactElement {
   const { token } = useAuth();
@@ -40,6 +41,7 @@ export default function App(): React.ReactElement {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/availability" element={<AvailabilityPage />} />
         <Route path="/admin/team" element={<TeamPage />} />
+        <Route path="/admin/audit" element={<AuditTrailPage />} />
         <Route path="/admin/invites" element={<Navigate to="/admin/team" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

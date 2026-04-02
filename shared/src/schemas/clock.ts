@@ -30,3 +30,39 @@ export const ClockSessionHistoryRowSchema = z.object({
 });
 
 export type ClockSessionHistoryRow = z.infer<typeof ClockSessionHistoryRowSchema>;
+
+export const ClockCodeLookupSchema = z.object({
+  code: z.string().min(1).max(32),
+});
+
+export type ClockCodeLookup = z.infer<typeof ClockCodeLookupSchema>;
+
+export const ClockCodePreviewResponseSchema = z.object({
+  staff: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    email: z.string().email(),
+  }),
+  shift: z.object({
+    id: z.string().uuid(),
+    startAtUtc: z.string(),
+    endAtUtc: z.string(),
+  }),
+  location: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    tzIana: z.string(),
+  }),
+  skillName: z.string(),
+  expiresAtUtc: z.string(),
+  managerLocationWarning: z.string().nullable(),
+  shiftLocationId: z.string().uuid(),
+});
+
+export type ClockCodePreviewResponse = z.infer<typeof ClockCodePreviewResponseSchema>;
+
+export const ClockApproveCodeResponseSchema = z.object({
+  sessionId: z.string().uuid(),
+});
+
+export type ClockApproveCodeResponse = z.infer<typeof ClockApproveCodeResponseSchema>;

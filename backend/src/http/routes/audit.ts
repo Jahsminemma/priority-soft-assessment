@@ -43,7 +43,7 @@ auditRouter.get("/export", authMiddleware, requireRoles("ADMIN"), async (req: Au
   }
   const from = new Date(parsed.data.from);
   const to = new Date(parsed.data.to);
-  const rows = await exportAuditLogs(user, from, to);
+  const rows = await exportAuditLogs(user, from, to, parsed.data.locationId);
   if (rows === null) {
     res.status(403).json({ error: "Forbidden" });
     return;

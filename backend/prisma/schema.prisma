@@ -82,7 +82,8 @@ model User {
   notifications      Notification[]
   auditLogs          AuditLog[] @relation("Actor")
   clockSessions      ClockSession[]
-  clockInVerificationCodes ClockInVerificationCode[]
+  clockInVerificationCodesAsStaff ClockInVerificationCode[] @relation("ClockVerificationStaff")
+  clockVerificationCodesVerified  ClockInVerificationCode[] @relation("ClockVerificationVerifier")
   registrationInvitesCreated RegistrationInvite[] @relation("RegistrationInvitesCreated")
 }
 
@@ -279,15 +280,17 @@ model ClockSession {
 
 /** Short-lived code staff shows to a manager to verify clock-in (consumed when manager confirms). */
 model ClockInVerificationCode {
-  id          String    @id @default(uuid())
-  code        String    @unique
-  staffUserId String
-  shiftId     String
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
-  consumedAt  DateTime?
-  staff       User      @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
-  shift       Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  id               String    @id @default(uuid())
+  code             String    @unique
+  staffUserId      String
+  shiftId          String
+  expiresAt        DateTime
+  createdAt        DateTime  @default(now())
+  consumedAt       DateTime?
+  verifiedByUserId String?
+  staff            User      @relation("ClockVerificationStaff", fields: [staffUserId], references: [id], onDelete: Cascade)
+  verifiedBy       User?     @relation("ClockVerificationVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  shift            Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   @@index([staffUserId, shiftId])
 }
