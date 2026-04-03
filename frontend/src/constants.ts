@@ -14,6 +14,11 @@ export const SEED: {
   shiftSfJamieRestTue: string;
   shiftSfSatLongJamie: string;
   shiftLaLineCookThu: string;
+  shiftSfOvernightFri: string;
+  shiftLaCaseyOtMon: string;
+  shiftBostonBartOpen: string;
+  shiftNyQuinnMonB: string;
+  shiftBostonTaylorMonB: string;
   staffSam: string;
   staffJordan: string;
   staffCasey: string;
@@ -41,6 +46,11 @@ export const SEED: {
   shiftSfJamieRestTue: "d0000000-0000-4000-8000-00000000000b",
   shiftSfSatLongJamie: "d0000000-0000-4000-8000-00000000000c",
   shiftLaLineCookThu: "d0000000-0000-4000-8000-00000000000d",
+  shiftSfOvernightFri: "d0000000-0000-4000-8000-000000000019",
+  shiftLaCaseyOtMon: "d0000000-0000-4000-8000-00000000000e",
+  shiftBostonBartOpen: "d0000000-0000-4000-8000-000000000016",
+  shiftNyQuinnMonB: "d0000000-0000-4000-8000-000000000018",
+  shiftBostonTaylorMonB: "d0000000-0000-4000-8000-000000000015",
   staffSam: "c0000000-0000-4000-8000-000000000010",
   staffJordan: "c0000000-0000-4000-8000-000000000011",
   staffCasey: "c0000000-0000-4000-8000-000000000012",

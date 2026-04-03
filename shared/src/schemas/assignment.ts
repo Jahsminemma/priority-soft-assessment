@@ -77,16 +77,20 @@ export const StaffAlternativeSchema = z.object({
 
 export type StaffAlternative = z.infer<typeof StaffAlternativeSchema>;
 
+const laborImpactNumber = z.coerce
+  .number()
+  .refine((n) => Number.isFinite(n), { message: "Expected a finite number" });
+
 /** Weekly OT projection for this site/week if this assignment is added (FIFO by shift start, 40h straight cap). */
 export const AssignmentLaborImpactSchema = z.object({
-  hourlyRateUsd: z.number(),
-  weeklyBaselineMinutes: z.number(),
-  weeklyAfterMinutes: z.number(),
-  hypotheticalShiftStraightMinutes: z.number(),
-  hypotheticalShiftOtMinutes: z.number(),
-  baselineLaborUsd: z.number(),
-  projectedLaborUsd: z.number(),
-  deltaLaborUsd: z.number(),
+  hourlyRateUsd: laborImpactNumber,
+  weeklyBaselineMinutes: laborImpactNumber,
+  weeklyAfterMinutes: laborImpactNumber,
+  hypotheticalShiftStraightMinutes: laborImpactNumber,
+  hypotheticalShiftOtMinutes: laborImpactNumber,
+  baselineLaborUsd: laborImpactNumber,
+  projectedLaborUsd: laborImpactNumber,
+  deltaLaborUsd: laborImpactNumber,
 });
 
 export type AssignmentLaborImpact = z.infer<typeof AssignmentLaborImpactSchema>;
@@ -102,7 +106,8 @@ export const AssignmentPreviewResponseSchema = z.object({
    * with a concise reason (which rule blocks them). Helps compare options when the first pick fails.
    */
   ineligibleCandidates: z.array(StaffAlternativeSchema),
-  laborImpact: AssignmentLaborImpactSchema.optional(),
+  /** Omitted when preview short-circuits (e.g. shift missing); null tolerated from some JSON encoders. */
+  laborImpact: AssignmentLaborImpactSchema.nullish(),
 });
 
 export type AssignmentPreviewResponse = z.infer<typeof AssignmentPreviewResponseSchema>;

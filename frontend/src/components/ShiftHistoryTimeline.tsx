@@ -19,7 +19,11 @@ const FIELD_LABELS: Record<string, string> = {
   emergencyOverrideReason: "Emergency reason",
   staffUserId: "Staff member",
   shiftId: "Shift",
+  secondShiftId: "Second shift",
   seventhDayOverrideReason: "7th-day override reason",
+  requesterId: "Requester",
+  targetId: "Other staff",
+  proposedTargetId: "Volunteer",
 };
 
 function formatFieldValue(key: string, value: unknown): string {

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import type { ConstraintViolation } from "@shiftsync/shared";
 import type {
   AssignmentCommitResponse,
   AssignmentLaborImpact,
@@ -23,6 +24,9 @@ import { emitAssignmentChanged, emitAssignmentConflict } from "../../realtime/ev
 import { canModifyShift } from "../shifts/shift.service.js";
 import { createNotification } from "../notifications/notification.service.js";
 import type { AuthedUser } from "../../security/index.js";
+
+const OT_WARNING_CODES = new Set(["WEEKLY_WARN_35", "WEEKLY_WARN_40"]);
+const SWAP_PAIR_LIMIT = 40;
 
 function gateResponseFromModifyShift(
   gate: Awaited<ReturnType<typeof canModifyShift>>,
@@ -247,6 +251,250 @@ export async function removeAssignment(
   return { ok: true };
 }
 
+function headcountFullViolation(headcount: number): ConstraintViolation {
+  return {
+    code: "HEADCOUNT_FULL",
+    message: `This shift is already fully staffed (${headcount} of ${headcount} slots). Remove someone or raise headcount to add another person.`,
+    severity: "hard",
+  };
+}
+
+function commitDeniedForModifyGate(
+  gate: Extract<Awaited<ReturnType<typeof canModifyShift>>, { ok: false }>,
+): AssignmentCommitResponse {
+  if (gate.code === "PAST_CUTOFF") {
+    return {
+      success: false,
+      hardViolations: [
+        {
+          code: "SCHEDULE_CUTOFF",
+          message:
+            "This schedule is locked within the edit cutoff before this shift. For urgent changes, use emergency coverage with emergencyOverrideReason on the request, or ask an administrator.",
+          severity: "hard",
+        },
+      ],
+      warnings: [],
+    };
+  }
+  return {
+    success: false,
+    hardViolations: [
+      {
+        code: "SHIFT_NOT_FOUND",
+        message:
+          gate.code === "FORBIDDEN"
+            ? "You can’t manage assignments for this location."
+            : "Shift not found.",
+        severity: "hard",
+      },
+    ],
+    warnings: [],
+  };
+}
+
+async function commitFailureWithAlternatives(
+  shiftId: string,
+  staffUserId: string,
+  hard: ConstraintViolation[],
+  warnings: ConstraintViolation[],
+): Promise<AssignmentCommitResponse> {
+  const alternatives = await findAlternatives(shiftId, 5);
+  const eligibleIds = new Set(alternatives.map((a) => a.staffUserId));
+  const ineligibleCandidates = await findIneligibleCandidates(shiftId, staffUserId, eligibleIds, 6);
+  return { success: false, hardViolations: hard, warnings, alternatives, ineligibleCandidates };
+}
+
+type AssignmentInsertTxResult =
+  | { kind: "ok"; created: { id: string }; warnings: ConstraintViolation[] }
+  | { kind: "shift_gone" }
+  | { kind: "headcount_full"; headcount: number }
+  | { kind: "constraints"; hard: ConstraintViolation[]; warnings: ConstraintViolation[] };
+
+async function executeSerializableAssignmentInsert(args: {
+  shiftId: string;
+  staffUserId: string;
+  actor: AuthedUser;
+  seventhDayOverrideReason: string | undefined;
+}): Promise<AssignmentInsertTxResult> {
+  const { shiftId, staffUserId, actor, seventhDayOverrideReason } = args;
+  return prisma.$transaction(
+    async (tx): Promise<AssignmentInsertTxResult> => {
+      const slot = await tx.shift.findUnique({
+        where: { id: shiftId },
+        include: { _count: { select: { assignments: true } } },
+      });
+      if (!slot) return { kind: "shift_gone" };
+      if (slot._count.assignments >= slot.headcount) {
+        return { kind: "headcount_full", headcount: slot.headcount };
+      }
+
+      const ctx = await buildConstraintContext(shiftId, staffUserId, tx);
+      const ev = evaluateAssignmentConstraints(ctx, { seventhDayOverrideReason });
+      if (ev.hard.length > 0) {
+        return { kind: "constraints", hard: ev.hard, warnings: ev.warnings };
+      }
+
+      await tx.user.findUniqueOrThrow({ where: { id: staffUserId } });
+
+      const created = await tx.shiftAssignment.create({
+        data: {
+          shiftId,
+          staffUserId,
+          status: "ASSIGNED",
+        },
+      });
+
+      const trimmedSeventh = seventhDayOverrideReason?.trim();
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actor.id,
+          entityType: "ShiftAssignment",
+          entityId: created.id,
+          action: "CREATE",
+          afterJson: {
+            shiftId,
+            staffUserId,
+            ...(trimmedSeventh ? { seventhDayOverrideReason: trimmedSeventh } : {}),
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      return { kind: "ok", created, warnings: ev.warnings };
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5_000,
+      timeout: 10_000,
+    },
+  );
+}
+
+async function finalizeAssignmentCommitSuccess(args: {
+  shiftId: string;
+  staffUserId: string;
+  actor: AuthedUser;
+  idempotencyKey: string;
+  assignmentId: string;
+  warnings: ConstraintViolation[];
+}): Promise<AssignmentCommitResponse> {
+  const { shiftId, staffUserId, actor, idempotencyKey, assignmentId, warnings } = args;
+
+  const res: AssignmentCommitResponse = {
+    success: true,
+    assignmentId,
+    hardViolations: [],
+    warnings,
+  };
+
+  await prisma.idempotencyKey.create({
+    data: { key: idempotencyKey, resultJson: res as Prisma.InputJsonValue },
+  });
+
+  const shiftRow = await prisma.shift.findUniqueOrThrow({
+    where: { id: shiftId },
+    select: {
+      id: true,
+      locationId: true,
+      startAtUtc: true,
+      endAtUtc: true,
+      weekKey: true,
+      location: { select: { tzIana: true, defaultHourlyRate: true } },
+    },
+  });
+  emitAssignmentChanged(shiftRow.locationId, {
+    shiftId,
+    staffUserId,
+    assignmentId,
+  });
+  await bumpScheduleContentRevision(shiftRow.locationId, shiftRow.weekKey);
+
+  const weekStartDateLocal = weekStartDateLocalFromWeekKey(shiftRow.weekKey, shiftRow.location.tzIana);
+  const scheduleWeek = await prisma.scheduleWeek.findUnique({
+    where: {
+      locationId_weekStartDateLocal: {
+        locationId: shiftRow.locationId,
+        weekStartDateLocal,
+      },
+    },
+    select: { status: true },
+  });
+  if (scheduleWeek?.status === "PUBLISHED") {
+    await createNotification(staffUserId, "assignment.created", {
+      shiftId,
+      assignmentId,
+      locationId: shiftRow.locationId,
+      weekKey: shiftRow.weekKey,
+      startAtUtc: shiftRow.startAtUtc.toISOString(),
+      endAtUtc: shiftRow.endAtUtc.toISOString(),
+    });
+  }
+
+  const otWarnings = warnings.filter((w) => OT_WARNING_CODES.has(w.code));
+  if (otWarnings.length > 0) {
+    const [laborImpact, staffMini, managerRows] = await Promise.all([
+      computeLaborImpactPreview(
+        {
+          id: shiftRow.id,
+          startAtUtc: shiftRow.startAtUtc,
+          endAtUtc: shiftRow.endAtUtc,
+          weekKey: shiftRow.weekKey,
+          locationId: shiftRow.locationId,
+          location: { defaultHourlyRate: shiftRow.location.defaultHourlyRate },
+        },
+        staffUserId,
+      ),
+      prisma.user.findUnique({ where: { id: staffUserId }, select: { name: true } }),
+      prisma.managerLocation.findMany({
+        where: { locationId: shiftRow.locationId },
+        select: { userId: true },
+      }),
+    ]);
+    const managerIds = [...new Set(managerRows.map((m) => m.userId))];
+    const staffLabel =
+      staffMini?.name != null && staffMini.name.trim() !== "" ? staffMini.name.trim() : staffUserId;
+    for (const mid of managerIds) {
+      await createNotification(mid, "assignment.overtime_risk", {
+        shiftId,
+        assignmentId,
+        staffUserId,
+        staffName: staffLabel,
+        locationId: shiftRow.locationId,
+        weekKey: shiftRow.weekKey,
+        warnings: otWarnings.map((w) => ({ code: w.code, message: w.message })),
+        laborImpact,
+      });
+    }
+  }
+
+  return res;
+}
+
+async function commitAssignmentConflictResponse(
+  code: "P2002" | "P2034",
+  shiftId: string,
+  actor: AuthedUser,
+): Promise<AssignmentCommitResponse> {
+  const message =
+    code === "P2002"
+      ? "Assignment conflict — staff may already be assigned to this shift."
+      : "Schedule changed while saving — refresh and try again.";
+  const loc = await prisma.shift.findUnique({ where: { id: shiftId }, select: { locationId: true } });
+  if (loc) {
+    emitAssignmentConflict(loc.locationId, {
+      shiftId,
+      message,
+      rejectedUserId: actor.id,
+    });
+  }
+  return {
+    success: false,
+    hardViolations: [],
+    warnings: [],
+    conflict: true,
+    message,
+  };
+}
+
 export async function commitAssignment(
   shiftId: string,
   staffUserId: string,
@@ -276,46 +524,13 @@ export async function commitAssignment(
 
   const modifyGate = await canModifyShift(actor, shiftId, modifyOpts);
   if (!modifyGate.ok) {
-    if (modifyGate.code === "PAST_CUTOFF") {
-      return {
-        success: false,
-        hardViolations: [
-          {
-            code: "SCHEDULE_CUTOFF",
-            message:
-              "This schedule is locked within the edit cutoff before this shift. For urgent changes, use emergency coverage with emergencyOverrideReason on the request, or ask an administrator.",
-            severity: "hard",
-          },
-        ],
-        warnings: [],
-      };
-    }
-    return {
-      success: false,
-      hardViolations: [
-        {
-          code: "SHIFT_NOT_FOUND",
-          message:
-            modifyGate.code === "FORBIDDEN"
-              ? "You can’t manage assignments for this location."
-              : "Shift not found.",
-          severity: "hard",
-        },
-      ],
-      warnings: [],
-    };
+    return commitDeniedForModifyGate(modifyGate);
   }
 
   if (shiftSlot._count.assignments >= shiftSlot.headcount) {
     return {
       success: false,
-      hardViolations: [
-        {
-          code: "HEADCOUNT_FULL",
-          message: `This shift is already fully staffed (${shiftSlot.headcount} of ${shiftSlot.headcount} slots). Remove someone or raise headcount to add another person.`,
-          severity: "hard",
-        },
-      ],
+      hardViolations: [headcountFullViolation(shiftSlot.headcount)],
       warnings: [],
     };
   }
@@ -324,116 +539,53 @@ export async function commitAssignment(
   const { hard, warnings } = evaluateAssignmentConstraints(constraintContext, { seventhDayOverrideReason });
 
   if (hard.length > 0) {
-    const alternatives = await findAlternatives(shiftId, 5);
-    const eligibleIds = new Set(alternatives.map((a) => a.staffUserId));
-    const ineligibleCandidates = await findIneligibleCandidates(shiftId, staffUserId, eligibleIds, 6);
-    const res: AssignmentCommitResponse = {
-      success: false,
-      hardViolations: hard,
-      warnings,
-      alternatives,
-      ineligibleCandidates,
-    };
-    return res;
+    return commitFailureWithAlternatives(shiftId, staffUserId, hard, warnings);
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.user.findUniqueOrThrow({ where: { id: staffUserId } });
-
-      const created = await tx.shiftAssignment.create({
-        data: {
-          shiftId,
-          staffUserId,
-          status: "ASSIGNED",
-        },
-      });
-
-      const trimmedSeventh = seventhDayOverrideReason?.trim();
-      await tx.auditLog.create({
-        data: {
-          actorUserId: actor.id,
-          entityType: "ShiftAssignment",
-          entityId: created.id,
-          action: "CREATE",
-          afterJson: {
-            shiftId,
-            staffUserId,
-            ...(trimmedSeventh ? { seventhDayOverrideReason: trimmedSeventh } : {}),
-          } as Prisma.InputJsonValue,
-        },
-      });
-
-      return created;
-    });
-
-    const res: AssignmentCommitResponse = {
-      success: true,
-      assignmentId: result.id,
-      hardViolations: [],
-      warnings,
-    };
-
-    await prisma.idempotencyKey.create({
-      data: { key: idempotencyKey, resultJson: res as Prisma.InputJsonValue },
-    });
-
-    const shiftRow = await prisma.shift.findUniqueOrThrow({
-      where: { id: shiftId },
-      select: {
-        locationId: true,
-        startAtUtc: true,
-        endAtUtc: true,
-        weekKey: true,
-        location: { select: { tzIana: true } },
-      },
-    });
-    emitAssignmentChanged(shiftRow.locationId, {
+    const txResult = await executeSerializableAssignmentInsert({
       shiftId,
       staffUserId,
-      assignmentId: result.id,
+      actor,
+      seventhDayOverrideReason,
     });
-    await bumpScheduleContentRevision(shiftRow.locationId, shiftRow.weekKey);
 
-    const weekStartDateLocal = weekStartDateLocalFromWeekKey(shiftRow.weekKey, shiftRow.location.tzIana);
-    const scheduleWeek = await prisma.scheduleWeek.findUnique({
-      where: {
-        locationId_weekStartDateLocal: {
-          locationId: shiftRow.locationId,
-          weekStartDateLocal,
-        },
-      },
-      select: { status: true },
-    });
-    if (scheduleWeek?.status === "PUBLISHED") {
-      await createNotification(staffUserId, "assignment.created", {
-        shiftId,
-        assignmentId: result.id,
-        locationId: shiftRow.locationId,
-        weekKey: shiftRow.weekKey,
-        startAtUtc: shiftRow.startAtUtc.toISOString(),
-        endAtUtc: shiftRow.endAtUtc.toISOString(),
-      });
-    }
-
-    return res;
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      const loc = await prisma.shift.findUnique({ where: { id: shiftId }, select: { locationId: true } });
-      if (loc) {
-        emitAssignmentConflict(loc.locationId, {
-          shiftId,
-          message: "Assignment conflict — staff may already be assigned to this shift.",
-          rejectedUserId: actor.id,
-        });
-      }
+    if (txResult.kind === "shift_gone") {
       return {
         success: false,
         hardViolations: [],
         warnings: [],
         conflict: true,
-        message: "Assignment conflict — staff may already be assigned to this shift.",
+        message: "This shift no longer exists. Refresh the schedule and try again.",
       };
+    }
+
+    if (txResult.kind === "headcount_full") {
+      return {
+        success: false,
+        hardViolations: [headcountFullViolation(txResult.headcount)],
+        warnings: [],
+      };
+    }
+
+    if (txResult.kind === "constraints") {
+      return commitFailureWithAlternatives(shiftId, staffUserId, txResult.hard, txResult.warnings);
+    }
+
+    return finalizeAssignmentCommitSuccess({
+      shiftId,
+      staffUserId,
+      actor,
+      idempotencyKey,
+      assignmentId: txResult.created.id,
+      warnings: txResult.warnings,
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return commitAssignmentConflictResponse("P2002", shiftId, actor);
+    }
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034") {
+      return commitAssignmentConflictResponse("P2034", shiftId, actor);
     }
     throw e;
   }
@@ -442,36 +594,39 @@ export async function commitAssignment(
 export async function buildConstraintContext(
   shiftId: string,
   staffUserId: string,
+  tx?: Prisma.TransactionClient,
 ): Promise<ConstraintContext> {
-  const shift = await prisma.shift.findUniqueOrThrow({
+  const db = tx ?? prisma;
+
+  const shift = await db.shift.findUniqueOrThrow({
     where: { id: shiftId },
     include: { location: true, requiredSkill: true },
   });
 
-  const staffUser = await prisma.user.findUnique({
+  const staffUser = await db.user.findUnique({
     where: { id: staffUserId },
     select: { name: true },
   });
 
-  const staffSkills = await prisma.staffSkill.findMany({
+  const staffSkills = await db.staffSkill.findMany({
     where: { userId: staffUserId },
     select: { skillId: true },
   });
 
-  const certs = await prisma.staffCertification.findMany({
+  const certs = await db.staffCertification.findMany({
     where: { userId: staffUserId },
     select: { locationId: true },
   });
 
-  const rules = await prisma.availabilityRule.findMany({
+  const rules = await db.availabilityRule.findMany({
     where: { userId: staffUserId },
   });
 
-  const exceptions = await prisma.availabilityException.findMany({
+  const exceptions = await db.availabilityException.findMany({
     where: { userId: staffUserId },
   });
 
-  const assignments = await prisma.shiftAssignment.findMany({
+  const assignments = await db.shiftAssignment.findMany({
     where: {
       staffUserId,
       shiftId: { not: shiftId },
@@ -516,8 +671,6 @@ export async function buildConstraintContext(
     otherAssignments,
   };
 }
-
-const SWAP_PAIR_LIMIT = 40;
 
 export type SwapPairCandidate = {
   staffUserId: string;

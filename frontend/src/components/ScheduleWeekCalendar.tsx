@@ -12,7 +12,6 @@ import {
 import {
   localDateStringToWeekKey,
   shiftWeekKey,
-  todayLocalYmd,
   weekKeyToLocalMondayYmd,
 } from "../utils/weekKey.js";
 import type { ShiftAssignmentRow } from "../types/shiftAssignment.js";
@@ -121,6 +120,8 @@ type Props = {
   removeAssignmentPending?: boolean;
   onEditShift?: (shift: ShiftDto) => void;
   headerActions?: ReactNode;
+  /** Compact status (e.g. cutoff) shown in the toolbar next to publish actions. */
+  toolbarStatusNote?: ReactNode;
 };
 
 export function ScheduleWeekCalendar({
@@ -146,6 +147,7 @@ export function ScheduleWeekCalendar({
   removeAssignmentPending = false,
   onEditShift,
   headerActions,
+  toolbarStatusNote,
 }: Props): ReactElement {
   const weekJumpId = useId();
   const dayKeys = useMemo(() => isoWeekDayKeysInLocationZone(weekKey, locationTz), [weekKey, locationTz]);
@@ -185,14 +187,6 @@ export function ScheduleWeekCalendar({
     if (!v) return;
     let next = localDateStringToWeekKey(v);
     if (minWeekKey != null && compareIsoWeekKeys(normalizeIsoWeekKey(next), normalizeIsoWeekKey(minWeekKey)) < 0) {
-      next = normalizeIsoWeekKey(minWeekKey);
-    }
-    onWeekKeyChange(next);
-  }
-
-  function goToday(): void {
-    let next = normalizeIsoWeekKey(localDateStringToWeekKey(todayLocalYmd()));
-    if (minWeekKey != null && compareIsoWeekKeys(next, normalizeIsoWeekKey(minWeekKey)) < 0) {
       next = normalizeIsoWeekKey(minWeekKey);
     }
     onWeekKeyChange(next);
@@ -296,9 +290,6 @@ export function ScheduleWeekCalendar({
               ›
             </button>
           </div>
-          <button type="button" className="schedule-cal__today-btn" onClick={goToday}>
-            Today
-          </button>
         </div>
         <div className="schedule-cal__header-right">
           <label className="schedule-cal__location-select-wrap">
@@ -328,8 +319,13 @@ export function ScheduleWeekCalendar({
               {staffRows.length} staff · {shifts.length} shifts
             </span>
           </div>
+          {toolbarStatusNote ? <div className="schedule-cal__toolbar-notes">{toolbarStatusNote}</div> : null}
           {headerActions ? <div className="schedule-cal__header-actions">{headerActions}</div> : null}
         </div>
+        <p className="schedule-cal__hint muted">
+          Pick <strong>location</strong> and <strong>week</strong> above, <strong>Add shift</strong> on a day, assign
+          with <strong>+</strong> in a staff row.
+        </p>
       </div>
 
       <div className="schedule-cal-scroll">

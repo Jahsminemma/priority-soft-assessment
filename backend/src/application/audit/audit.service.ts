@@ -30,6 +30,144 @@ type RawRow = {
 
 type UserMeta = { id: string; name: string; role: "ADMIN" | "MANAGER" | "STAFF" };
 
+type RefIdBuckets = {
+  userIds: Set<string>;
+  locationIds: Set<string>;
+  skillIds: Set<string>;
+  shiftIds: Set<string>;
+};
+
+type DisplayEnrichMaps = {
+  userNameById: Map<string, string>;
+  locationNameById: Map<string, string>;
+  skillNameById: Map<string, string>;
+  shiftLabelById: Map<string, string>;
+};
+
+function looksLikeUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function collectReferenceIds(value: unknown, acc: RefIdBuckets): void {
+  if (value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    for (const x of value) collectReferenceIds(x, acc);
+    return;
+  }
+  if (typeof value !== "object") return;
+  const o = value as Record<string, unknown>;
+  for (const [k, v] of Object.entries(o)) {
+    if (typeof v === "string" && looksLikeUuid(v)) {
+      if (
+        k === "staffUserId" ||
+        k === "actorUserId" ||
+        k === "userId" ||
+        k === "requesterUserId" ||
+        k === "targetUserId" ||
+        k === "requesterId" ||
+        k === "targetId" ||
+        k === "proposedTargetId"
+      ) {
+        acc.userIds.add(v);
+      } else if (k === "locationId") {
+        acc.locationIds.add(v);
+      } else if (k === "requiredSkillId" || k === "skillId") {
+        acc.skillIds.add(v);
+      } else if (k === "shiftId" || k === "secondShiftId") {
+        acc.shiftIds.add(v);
+      }
+    } else if (typeof v === "object") {
+      collectReferenceIds(v, acc);
+    }
+  }
+}
+
+function formatShiftRangeUtc(startAtUtc: Date, endAtUtc: Date): string {
+  const fmt = (d: Date) => d.toISOString().slice(0, 16).replace("T", " ");
+  return `${fmt(startAtUtc)}–${fmt(endAtUtc)} UTC`;
+}
+
+async function buildDisplayEnrichMaps(buckets: RefIdBuckets, viewingShiftId: string): Promise<DisplayEnrichMaps> {
+  const [users, locs, skills, shifts] = await Promise.all([
+    buckets.userIds.size > 0
+      ? prisma.user.findMany({
+          where: { id: { in: [...buckets.userIds] } },
+          select: { id: true, name: true },
+        })
+      : [],
+    buckets.locationIds.size > 0
+      ? prisma.location.findMany({
+          where: { id: { in: [...buckets.locationIds] } },
+          select: { id: true, name: true },
+        })
+      : [],
+    buckets.skillIds.size > 0
+      ? prisma.skill.findMany({
+          where: { id: { in: [...buckets.skillIds] } },
+          select: { id: true, name: true },
+        })
+      : [],
+    buckets.shiftIds.size > 0
+      ? prisma.shift.findMany({
+          where: { id: { in: [...buckets.shiftIds] } },
+          select: { id: true, startAtUtc: true, endAtUtc: true },
+        })
+      : [],
+  ]);
+
+  const shiftLabelById = new Map<string, string>();
+  for (const s of shifts) {
+    const label =
+      s.id === viewingShiftId ? "This shift" : formatShiftRangeUtc(s.startAtUtc, s.endAtUtc);
+    shiftLabelById.set(s.id, label);
+  }
+
+  return {
+    userNameById: new Map(users.map((u) => [u.id, u.name.trim() !== "" ? u.name.trim() : u.id])),
+    locationNameById: new Map(locs.map((l) => [l.id, l.name])),
+    skillNameById: new Map(skills.map((sk) => [sk.id, sk.name])),
+    shiftLabelById,
+  };
+}
+
+function enrichAuditJson(value: unknown, maps: DisplayEnrichMaps, viewingShiftId: string): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map((x) => enrichAuditJson(x, maps, viewingShiftId));
+  if (typeof value !== "object") return value;
+  const o = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (typeof v === "string" && looksLikeUuid(v)) {
+      if (
+        k === "staffUserId" ||
+        k === "actorUserId" ||
+        k === "userId" ||
+        k === "requesterUserId" ||
+        k === "targetUserId" ||
+        k === "requesterId" ||
+        k === "targetId" ||
+        k === "proposedTargetId"
+      ) {
+        out[k] = maps.userNameById.get(v) ?? v;
+      } else if (k === "locationId") {
+        out[k] = maps.locationNameById.get(v) ?? v;
+      } else if (k === "requiredSkillId" || k === "skillId") {
+        out[k] = maps.skillNameById.get(v) ?? v;
+      } else if (k === "shiftId" || k === "secondShiftId") {
+        if (v === viewingShiftId) out[k] = "This shift";
+        else out[k] = maps.shiftLabelById.get(v) ?? v;
+      } else {
+        out[k] = v;
+      }
+    } else if (typeof v === "object") {
+      out[k] = enrichAuditJson(v, maps, viewingShiftId);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 async function actorMetaMap(actorUserIds: string[]): Promise<Map<string, UserMeta>> {
   if (actorUserIds.length === 0) return new Map();
   const users = await prisma.user.findMany({
@@ -110,7 +248,13 @@ async function buildLocationLookups(rows: RawRow[]): Promise<{
   return { locById, shiftToLoc };
 }
 
-function toDto(rows: RawRow[], meta: Map<string, UserMeta>, locById: Map<string, { id: string; name: string }>, shiftToLoc: Map<string, string>): AuditLogRowDto[] {
+function toDto(
+  rows: RawRow[],
+  meta: Map<string, UserMeta>,
+  locById: Map<string, { id: string; name: string }>,
+  shiftToLoc: Map<string, string>,
+  enrich?: { maps: DisplayEnrichMaps; viewingShiftId: string },
+): AuditLogRowDto[] {
   return rows.map((r) => {
     const actor = meta.get(r.actorUserId);
     const { locationId, locationName } = resolveLocation(r, locById, shiftToLoc);
@@ -122,8 +266,8 @@ function toDto(rows: RawRow[], meta: Map<string, UserMeta>, locById: Map<string,
       entityType: r.entityType,
       entityId: r.entityId,
       action: r.action,
-      beforeJson: r.beforeJson ?? null,
-      afterJson: r.afterJson ?? null,
+      beforeJson: enrich ? enrichAuditJson(r.beforeJson, enrich.maps, enrich.viewingShiftId) : (r.beforeJson ?? null),
+      afterJson: enrich ? enrichAuditJson(r.afterJson, enrich.maps, enrich.viewingShiftId) : (r.afterJson ?? null),
       createdAt: r.createdAt.toISOString(),
       locationId,
       locationName,
@@ -155,7 +299,19 @@ export async function listAuditForShift(actor: AuthedUser, shiftId: string): Pro
 
   const meta = await actorMetaMap(rows.map((r) => r.actorUserId));
   const { locById, shiftToLoc } = await buildLocationLookups(rows);
-  return toDto(rows, meta, locById, shiftToLoc);
+
+  const buckets: RefIdBuckets = {
+    userIds: new Set(),
+    locationIds: new Set(),
+    skillIds: new Set(),
+    shiftIds: new Set(),
+  };
+  for (const r of rows) {
+    collectReferenceIds(r.beforeJson, buckets);
+    collectReferenceIds(r.afterJson, buckets);
+  }
+  const displayMaps = await buildDisplayEnrichMaps(buckets, shiftId);
+  return toDto(rows, meta, locById, shiftToLoc, { maps: displayMaps, viewingShiftId: shiftId });
 }
 
 export async function listAuditForLocation(

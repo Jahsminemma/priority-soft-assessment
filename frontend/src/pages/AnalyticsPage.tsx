@@ -16,8 +16,6 @@ function defaultWeekKeyLast(): string {
   return shiftWeekKey(todayWk, -1) ?? todayWk;
 }
 
-type TimePreset = "last-week" | "this-week" | "custom";
-
 function fairnessStatusLabel(
   scheduledHours: number,
   desired: number | null,
@@ -42,7 +40,6 @@ export default function AnalyticsPage(): React.ReactElement {
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const [locationId, setLocationId] = useState<string | "all">("all");
-  const [timePreset, setTimePreset] = useState<TimePreset>("last-week");
   const [weekKey, setWeekKey] = useState(() => defaultWeekKeyLast());
 
   const locationsQuery = useQuery({
@@ -61,16 +58,6 @@ export default function AnalyticsPage(): React.ReactElement {
       return user?.role === "ADMIN" ? "all" : list[0]!.id;
     });
   }, [locationsQuery.data, user?.role]);
-
-  useEffect(() => {
-    const todayWk = normalizeIsoWeekKey(initialWeekKeyFromToday());
-    if (timePreset === "this-week") {
-      setWeekKey(todayWk);
-    } else if (timePreset === "last-week") {
-      const w = shiftWeekKey(todayWk, -1);
-      if (w) setWeekKey(w);
-    }
-  }, [timePreset]);
 
   const fairnessQuery = useQuery({
     queryKey: ["analytics", "fairness", locationId, weekKey],
@@ -111,12 +98,7 @@ export default function AnalyticsPage(): React.ReactElement {
     };
   }, [rows]);
 
-  const timeRangeLabel =
-    timePreset === "last-week"
-      ? "Last week"
-      : timePreset === "this-week"
-        ? "This week"
-        : formatWeekRangeCompact(weekKey);
+  const timeRangeLabel = formatWeekRangeCompact(weekKey);
 
   if (!canManage) {
     return (
@@ -160,22 +142,12 @@ export default function AnalyticsPage(): React.ReactElement {
               ))}
             </select>
           </label>
-          <label className="field field--inline analytics-page__filter">
-            <span className="field__label">Period</span>
-            <select value={timePreset} onChange={(e) => setTimePreset(e.target.value as TimePreset)}>
-              <option value="last-week">Last week</option>
-              <option value="this-week">This week</option>
-              <option value="custom">Custom week…</option>
-            </select>
-          </label>
         </div>
       </header>
 
-      {timePreset === "custom" ? (
-        <div className="analytics-page__custom-week card card--compact">
-          <WeekPicker weekKey={weekKey} onWeekKeyChange={(wk) => setWeekKey(normalizeIsoWeekKey(wk))} id="analytics-week" />
-        </div>
-      ) : null}
+      <div className="analytics-page__custom-week card card--compact">
+        <WeekPicker weekKey={weekKey} onWeekKeyChange={(wk) => setWeekKey(normalizeIsoWeekKey(wk))} id="analytics-week" />
+      </div>
 
       <section className="card analytics-card analytics-card--highlight" aria-labelledby="analytics-fairness-score-heading">
         <h2 id="analytics-fairness-score-heading" className="analytics-card__title">

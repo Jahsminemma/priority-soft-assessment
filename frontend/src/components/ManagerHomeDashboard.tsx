@@ -103,6 +103,14 @@ export function ManagerHomeDashboard({ token, userName, role }: Props): React.Re
   });
   const primaryLocationName = locationsQuery.data?.find((l) => l.id === primaryLocationId)?.name;
 
+  const topOtDrivers = useMemo(() => {
+    const rows = overtimeCostQuery.data?.assignments ?? [];
+    return [...rows]
+      .filter((a) => a.otUsd > 0)
+      .sort((a, b) => b.otUsd - a.otUsd)
+      .slice(0, 5);
+  }, [overtimeCostQuery.data]);
+
   const greeting = useMemo(() => {
     const h = DateTime.now().hour;
     if (h < 12) return "Good morning";
@@ -139,6 +147,24 @@ export function ManagerHomeDashboard({ token, userName, role }: Props): React.Re
               <p className="manager-dash__ot-card-meta">
                 Week labor (straight + OT): {usd(overtimeCostQuery.data.totalLaborUsd)}
               </p>
+              {topOtDrivers.length > 0 ? (
+                <div className="manager-dash__ot-drivers">
+                  <p className="manager-dash__ot-drivers-title">Assignments driving OT (FIFO by start time)</p>
+                  <ul className="manager-dash__ot-drivers-list">
+                    {topOtDrivers.map((a) => (
+                      <li key={a.assignmentId}>
+                        <span className="manager-dash__ot-drivers-name">{a.staffName}</span>
+                        <span className="muted">
+                          {" "}
+                          · OT {usd(a.otUsd)} ({Math.round(a.otMinutes)} min @ 1.5×)
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="manager-dash__ot-card-meta muted">No OT-attributed minutes this week at this site.</p>
+              )}
               <Link to="/analytics" className="manager-dash__ot-card-link">
                 View hours and fairness in Analytics →
               </Link>

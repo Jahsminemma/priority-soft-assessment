@@ -25,6 +25,23 @@ const SHIFT_IDS = {
   sfJamieRestTue: "d0000000-0000-4000-8000-00000000000b",
   sfSatLongJamie: "d0000000-0000-4000-8000-00000000000c",
   laLineCookThu: "d0000000-0000-4000-8000-00000000000d",
+  /** LA only — Casey stacked for projected OT + WEEKLY_WARN at this site (Analytics). */
+  laCaseyOtMon: "d0000000-0000-4000-8000-00000000000e",
+  laCaseyOtTue: "d0000000-0000-4000-8000-00000000000f",
+  laCaseyOtWed: "d0000000-0000-4000-8000-000000000010",
+  laCaseyOtThu: "d0000000-0000-4000-8000-000000000011",
+  laCaseyOtFri: "d0000000-0000-4000-8000-000000000012",
+  laCaseyOtSat: "d0000000-0000-4000-8000-000000000013",
+  /** Boston — Taylor Mon split: assign 2nd slot to preview DAILY_WARN_8H. */
+  bosTaylorMonA: "d0000000-0000-4000-8000-000000000014",
+  bosTaylorMonB: "d0000000-0000-4000-8000-000000000015",
+  /** Boston — open bartender; Pat/Riley preview → NOT_CERTIFIED. */
+  bosBartOpen: "d0000000-0000-4000-8000-000000000016",
+  /** NYC — Quinn Mon split: assign 2nd to preview DAILY_WARN_8H. */
+  nyQuinnMonA: "d0000000-0000-4000-8000-000000000017",
+  nyQuinnMonB: "d0000000-0000-4000-8000-000000000018",
+  /** SF — crosses local midnight (segmented day rules). */
+  sfOvernightFri: "d0000000-0000-4000-8000-000000000019",
 } as const;
 
 const ALL_SHIFT_IDS: string[] = Object.values(SHIFT_IDS);
@@ -62,6 +79,18 @@ async function main(): Promise<void> {
       name: "Coastal Eats — NYC",
       tzIana: "America/New_York",
       defaultHourlyRate: 25,
+    },
+  });
+
+  /** Fourth site — same Eastern zone as NYC (brief: four locations, two US time zones). */
+  const locBoston = await prisma.location.upsert({
+    where: { id: "a0000000-0000-4000-8000-000000000004" },
+    update: { defaultHourlyRate: 24 },
+    create: {
+      id: "a0000000-0000-4000-8000-000000000004",
+      name: "Coastal Eats — Boston",
+      tzIana: "America/New_York",
+      defaultHourlyRate: 24,
     },
   });
 
@@ -118,6 +147,7 @@ async function main(): Promise<void> {
       { userId: manager.id, locationId: locSf.id },
       { userId: manager.id, locationId: locLa.id },
       { userId: manager.id, locationId: locNy.id },
+      { userId: manager.id, locationId: locBoston.id },
     ],
   });
 
@@ -290,13 +320,16 @@ async function main(): Promise<void> {
     data: [
       { userId: staffSam.id, locationId: locSf.id },
       { userId: staffSam.id, locationId: locNy.id },
+      { userId: staffSam.id, locationId: locBoston.id },
       { userId: staffJordan.id, locationId: locSf.id },
       { userId: staffJordan.id, locationId: locNy.id },
+      { userId: staffJordan.id, locationId: locBoston.id },
       { userId: staffCasey.id, locationId: locLa.id },
       { userId: staffRiley.id, locationId: locLa.id },
       { userId: staffJamie.id, locationId: locSf.id },
       { userId: staffJamie.id, locationId: locLa.id },
       { userId: staffJamie.id, locationId: locNy.id },
+      { userId: staffJamie.id, locationId: locBoston.id },
       { userId: staffPat.id, locationId: locSf.id },
       { userId: staffPat.id, locationId: locLa.id },
       { userId: staffPat.id, locationId: locNy.id },
@@ -306,6 +339,7 @@ async function main(): Promise<void> {
       { userId: staffTaylor.id, locationId: locSf.id },
       { userId: staffTaylor.id, locationId: locLa.id },
       { userId: staffTaylor.id, locationId: locNy.id },
+      { userId: staffTaylor.id, locationId: locBoston.id },
       { userId: staffDrew.id, locationId: locSf.id },
       { userId: staffDrew.id, locationId: locLa.id },
       { userId: staffEve.id, locationId: locSf.id },
@@ -397,6 +431,30 @@ async function main(): Promise<void> {
   const shiftNyServerStart = thuNy.set({ hour: 14, minute: 0, second: 0, millisecond: 0 });
   const shiftNyServerEnd = thuNy.set({ hour: 20, minute: 0, second: 0, millisecond: 0 });
 
+  const monLa = DateTime.fromObject({ weekYear, weekNumber }, { zone: locLa.tzIana }).startOf("week");
+  const satLa = monLa.plus({ days: 5 });
+  const laCaseyDay = (d: number) => monLa.plus({ days: d }).set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+  const laCaseyDayEnd = (d: number) => monLa.plus({ days: d }).set({ hour: 18, minute: 0, second: 0, millisecond: 0 });
+  const laCaseySatStart = satLa.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+  const laCaseySatEnd = satLa.set({ hour: 17, minute: 0, second: 0, millisecond: 0 });
+
+  const monBoston = DateTime.fromObject({ weekYear, weekNumber }, { zone: locBoston.tzIana }).startOf("week");
+  const bosSat = monBoston.plus({ days: 5 });
+  const bosTaylorMonAStart = monBoston.set({ hour: 11, minute: 0, second: 0, millisecond: 0 });
+  const bosTaylorMonAEnd = monBoston.set({ hour: 15, minute: 0, second: 0, millisecond: 0 });
+  const bosTaylorMonBStart = monBoston.set({ hour: 16, minute: 0, second: 0, millisecond: 0 });
+  const bosTaylorMonBEnd = monBoston.set({ hour: 21, minute: 0, second: 0, millisecond: 0 });
+  const bosBartStart = bosSat.set({ hour: 18, minute: 0, second: 0, millisecond: 0 });
+  const bosBartEnd = bosSat.set({ hour: 23, minute: 0, second: 0, millisecond: 0 });
+
+  const nyQuinnMonAStart = monNy.set({ hour: 10, minute: 0, second: 0, millisecond: 0 });
+  const nyQuinnMonAEnd = monNy.set({ hour: 14, minute: 0, second: 0, millisecond: 0 });
+  const nyQuinnMonBStart = monNy.set({ hour: 15, minute: 0, second: 0, millisecond: 0 });
+  const nyQuinnMonBEnd = monNy.set({ hour: 20, minute: 0, second: 0, millisecond: 0 });
+
+  const shiftSfOvernightStart = friSf.set({ hour: 22, minute: 0, second: 0, millisecond: 0 });
+  const shiftSfOvernightEnd = satSf.set({ hour: 2, minute: 0, second: 0, millisecond: 0 });
+
   const weekStartSf = monSf.toFormat("yyyy-LL-dd");
   const weekStartLa = DateTime.fromObject({ weekYear, weekNumber }, { zone: locLa.tzIana })
     .startOf("week")
@@ -468,6 +526,18 @@ async function main(): Promise<void> {
     update: { status: "PUBLISHED", cutoffHours: 48 },
     create: {
       locationId: locNy.id,
+      weekStartDateLocal: weekStartNy,
+      status: "PUBLISHED",
+      cutoffHours: 48,
+    },
+  });
+  await prisma.scheduleWeek.upsert({
+    where: {
+      locationId_weekStartDateLocal: { locationId: locBoston.id, weekStartDateLocal: weekStartNy },
+    },
+    update: { status: "PUBLISHED", cutoffHours: 48 },
+    create: {
+      locationId: locBoston.id,
       weekStartDateLocal: weekStartNy,
       status: "PUBLISHED",
       cutoffHours: 48,
@@ -632,6 +702,150 @@ async function main(): Promise<void> {
         weekKey,
         createdById: manager.id,
       },
+      {
+        id: SHIFT_IDS.laCaseyOtMon,
+        locationId: locLa.id,
+        startAtUtc: wallUtc(laCaseyDay(0)),
+        endAtUtc: wallUtc(laCaseyDayEnd(0)),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.laCaseyOtTue,
+        locationId: locLa.id,
+        startAtUtc: wallUtc(laCaseyDay(1)),
+        endAtUtc: wallUtc(laCaseyDayEnd(1)),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.laCaseyOtWed,
+        locationId: locLa.id,
+        startAtUtc: wallUtc(laCaseyDay(2)),
+        endAtUtc: wallUtc(laCaseyDayEnd(2)),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.laCaseyOtThu,
+        locationId: locLa.id,
+        startAtUtc: wallUtc(laCaseyDay(3)),
+        endAtUtc: wallUtc(laCaseyDayEnd(3)),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.laCaseyOtFri,
+        locationId: locLa.id,
+        startAtUtc: wallUtc(laCaseyDay(4)),
+        endAtUtc: wallUtc(laCaseyDayEnd(4)),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.laCaseyOtSat,
+        locationId: locLa.id,
+        startAtUtc: wallUtc(laCaseySatStart),
+        endAtUtc: wallUtc(laCaseySatEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.bosTaylorMonA,
+        locationId: locBoston.id,
+        startAtUtc: wallUtc(bosTaylorMonAStart),
+        endAtUtc: wallUtc(bosTaylorMonAEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.bosTaylorMonB,
+        locationId: locBoston.id,
+        startAtUtc: wallUtc(bosTaylorMonBStart),
+        endAtUtc: wallUtc(bosTaylorMonBEnd),
+        requiredSkillId: skillServer.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.bosBartOpen,
+        locationId: locBoston.id,
+        startAtUtc: wallUtc(bosBartStart),
+        endAtUtc: wallUtc(bosBartEnd),
+        requiredSkillId: skillBar.id,
+        headcount: 1,
+        isPremium: true,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.nyQuinnMonA,
+        locationId: locNy.id,
+        startAtUtc: wallUtc(nyQuinnMonAStart),
+        endAtUtc: wallUtc(nyQuinnMonAEnd),
+        requiredSkillId: skillHost.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.nyQuinnMonB,
+        locationId: locNy.id,
+        startAtUtc: wallUtc(nyQuinnMonBStart),
+        endAtUtc: wallUtc(nyQuinnMonBEnd),
+        requiredSkillId: skillHost.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
+      {
+        id: SHIFT_IDS.sfOvernightFri,
+        locationId: locSf.id,
+        startAtUtc: wallUtc(shiftSfOvernightStart),
+        endAtUtc: wallUtc(shiftSfOvernightEnd),
+        requiredSkillId: skillBar.id,
+        headcount: 1,
+        isPremium: false,
+        status: "PUBLISHED",
+        weekKey,
+        createdById: manager.id,
+      },
     ],
   });
 
@@ -651,6 +865,15 @@ async function main(): Promise<void> {
       { shiftId: SHIFT_IDS.sfJamieRestTue, staffUserId: staffJamie.id, status: "ASSIGNED" },
       { shiftId: SHIFT_IDS.sfSatLongJamie, staffUserId: staffJamie.id, status: "ASSIGNED" },
       { shiftId: SHIFT_IDS.laLineCookThu, staffUserId: staffDrew.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.laCaseyOtMon, staffUserId: staffCasey.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.laCaseyOtTue, staffUserId: staffCasey.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.laCaseyOtWed, staffUserId: staffCasey.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.laCaseyOtThu, staffUserId: staffCasey.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.laCaseyOtFri, staffUserId: staffCasey.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.laCaseyOtSat, staffUserId: staffCasey.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.bosTaylorMonA, staffUserId: staffTaylor.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.nyQuinnMonA, staffUserId: staffQuinn.id, status: "ASSIGNED" },
+      { shiftId: SHIFT_IDS.sfOvernightFri, staffUserId: staffTaylor.id, status: "ASSIGNED" },
     ],
   });
 
@@ -692,14 +915,20 @@ async function main(): Promise<void> {
   console.log("Seed OK — next ISO week (Mon–Sun); multi-location + constraint + coverage scenarios.");
   console.log({
     weekKey,
-    weekStarts: { sf: weekStartSf, la: weekStartLa, ny: weekStartNy },
+    weekStarts: { sf: weekStartSf, la: weekStartLa, ny: weekStartNy, boston: weekStartNy },
     accounts: {
       password: "password123",
-      manager: "manager@coastaleats.test (SF+LA+NYC)",
+      manager: "manager@coastaleats.test (SF+LA+NYC+Boston)",
       admin: "admin@coastaleats.test",
       staff: "sam@, jordan@, casey@, riley@, jamie@, pat@, quinn@, taylor@, drew@, eve@coastaleats.test",
     },
     scenarios: {
+      byLocation: {
+        sf: "Overlap + 10h rest + Sat 12h+ day + Wed unavail (Sam) + overnight Fri→Sat bar (Taylor) + swap/drop queue",
+        la: "Casey Mon–Sat server stack (~47h) → Analytics OT + WEEKLY_WARN on more assigns · line cook understaffed Thu",
+        nyc: "Thu host+server · Mon Quinn host A assigned — preview assign Quinn on Mon B → DAILY_WARN_8H",
+        boston: "Taylor Mon A assigned — preview Taylor on Mon B → DAILY_WARN_8H · Sat bartender OPEN — preview Pat → NOT_CERTIFIED",
+      },
       sfServerDraft: "DRAFT · Pat PROPOSED (publish / assign flows)",
       sfServerPartial: "PUBLISHED · Sam ASSIGNED + PENDING SWAP with Jordan’s Fri bar shift",
       sfBartenderFull: "PUBLISHED premium · Jordan ASSIGNED",
@@ -710,6 +939,7 @@ async function main(): Promise<void> {
       jamieRest: "Mon eve + Tue early · Jamie — constraint: REST_10H",
       jamieSatLong: "Sat · Jamie 13h single shift — DAILY_HARD_12H / warnings",
       laLineCookThu: "LA Thu · line cook headcount 2 · Drew assigned (1 open)",
+      laCaseyOt: "LA · Casey 47h week — projected OT dollars (FIFO) at LA in Analytics / Manager home",
       samWedOff: "Sam UNAVAILABLE all Wed (SF) — new Wed assignments blocked",
       eveWeekend: "Eve — server SF cert · availability Sat/Sun only",
       analytics: "Location default hourly rates + Sam/Jordan wage overrides",

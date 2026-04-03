@@ -66,8 +66,10 @@ export default function SettingsPage(): React.ReactElement {
     <div className="page">
       <h1 className="page__title">Settings</h1>
       <p className="page__lead muted">
-        Choose how you want to be notified. In-app messages always appear in your notification list. Email (demo) is for
-        teams that will add real email later—in this demo it only records your choice.
+        Choose how you want to be notified. In-app messages always appear in your notification list. When “Email (simulated)”
+        is on, the API still does not send real mail—it stamps{" "}
+        <code>delivery.emailSimulated</code> on your notifications and logs a line in development
+        server output so reviewers can see the path.
       </p>
 
       <div className="card stack">
@@ -79,7 +81,7 @@ export default function SettingsPage(): React.ReactElement {
         </label>
         <label className="field field--checkbox">
           <input type="checkbox" checked={emailSim} onChange={(e) => setEmailSim(e.target.checked)} />
-          <span>Email (no real email sending capability yet)</span>
+          <span>Email (simulated — payload + dev server log, no SMTP)</span>
         </label>
         <button type="button" className="btn btn--primary" disabled={saveMut.isPending} onClick={() => void saveMut.mutateAsync()}>
           {saveMut.isPending ? "Saving…" : "Save changes"}
