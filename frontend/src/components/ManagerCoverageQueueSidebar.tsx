@@ -37,7 +37,7 @@ function QueueCard({
   const dropModeLabel =
     item.type === "DROP" && item.status === "PENDING"
       ? item.calloutMode === "OPEN"
-        ? "Open — first claim"
+        ? "Open — awaiting claim"
         : "Direct assign"
       : null;
   return (

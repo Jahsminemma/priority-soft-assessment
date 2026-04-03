@@ -19,7 +19,6 @@ type MobileNavDrawerProps = {
 const drawerLinkClass = ({ isActive }: { isActive: boolean }): string =>
   `nav-rail__link${isActive ? " nav-rail__link--active" : ""}`;
 
-/** Dark slide-out navigation (mobile). Same links & styling as desktop sidebar. */
 export function MobileNavDrawer({
   open,
   onClose,
@@ -70,9 +69,6 @@ export function MobileNavDrawer({
       >
         <div className="nav-rail__top">
           <div className="nav-rail__brand-row">
-            <div className="nav-rail__logo-mark" aria-hidden>
-              <IconCalendarMark />
-            </div>
             <div className="nav-rail__brand-text-block">
               <span className="nav-rail__brand-text">ShiftSync</span>
             </div>

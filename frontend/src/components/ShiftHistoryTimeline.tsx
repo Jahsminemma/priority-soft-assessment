@@ -19,7 +19,11 @@ const FIELD_LABELS: Record<string, string> = {
   emergencyOverrideReason: "Emergency reason",
   staffUserId: "Staff member",
   shiftId: "Shift",
+  secondShiftId: "Second shift",
   seventhDayOverrideReason: "7th-day override reason",
+  requesterId: "Requester",
+  targetId: "Other staff",
+  proposedTargetId: "Volunteer",
 };
 
 function formatFieldValue(key: string, value: unknown): string {
@@ -75,7 +79,13 @@ function actionMeta(entityType: string, action: string): ActionMeta {
     "CoverageRequest:APPROVE":  { label: "Swap manager-approved",  icon: "✓", color: "green" },
     "CoverageRequest:CANCEL":   { label: "Coverage cancelled",     icon: "✕", color: "red" },
     "CoverageRequest:EXPIRE":   { label: "Coverage expired",       icon: "⌛", color: "orange" },
-    "CoverageRequest:CLAIM":    { label: "Open shift claimed",     icon: "★", color: "green" },
+    "CoverageRequest:CLAIM_OPEN_DROP_PENDING": {
+      label: "Volunteered for open shift (pending approval)",
+      icon: "☆",
+      color: "blue",
+    },
+    "CoverageRequest:MANAGER_ASSIGN_DROP": { label: "Manager assigned open shift", icon: "★", color: "green" },
+    "CoverageRequest:CLAIM": { label: "Open shift finalized", icon: "★", color: "green" },
   };
   return map[key] ?? { label: `${action} (${entityType})`, icon: "●", color: "muted" };
 }

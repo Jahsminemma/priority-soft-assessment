@@ -458,31 +458,52 @@ export function ScheduleCellAssignDialog({
                     : "This assignment can’t go through yet—see what’s blocking it below."}
                 </div>
                 {preview.laborImpact ? (
-                  <div className="schedule-assign-labor-impact">
+                  <div className="schedule-assign-labor-impact" aria-label="Labor impact preview">
                     <p className="schedule-assign-labor-impact__title">If you confirm (this site, this week)</p>
                     <ul className="schedule-assign-labor-impact__grid">
-                      <li>
-                        <span className="muted">Rate used</span> · {formatUsd(preview.laborImpact.hourlyRateUsd)}/h
+                      <li className="schedule-assign-labor-impact__stat">
+                        <span className="schedule-assign-labor-impact__label">Rate used</span>
+                        <span className="schedule-assign-labor-impact__value">
+                          {formatUsd(preview.laborImpact.hourlyRateUsd)}/h
+                        </span>
                       </li>
-                      <li>
-                        <span className="muted">Week scheduled</span> · {fmtHoursFromMin(preview.laborImpact.weeklyBaselineMinutes)} →{" "}
-                        {fmtHoursFromMin(preview.laborImpact.weeklyAfterMinutes)}
+                      <li className="schedule-assign-labor-impact__stat">
+                        <span className="schedule-assign-labor-impact__label">Week scheduled</span>
+                        <span className="schedule-assign-labor-impact__value schedule-assign-labor-impact__value--transition">
+                          <span>{fmtHoursFromMin(preview.laborImpact.weeklyBaselineMinutes)}</span>
+                          <span className="schedule-assign-labor-impact__arrow" aria-hidden>
+                            →
+                          </span>
+                          <span>{fmtHoursFromMin(preview.laborImpact.weeklyAfterMinutes)}</span>
+                        </span>
                       </li>
-                      <li>
-                        <span className="muted">This shift</span> · {fmtHoursFromMin(preview.laborImpact.hypotheticalShiftStraightMinutes)} straight
-                        {preview.laborImpact.hypotheticalShiftOtMinutes > 0 ? (
-                          <>
-                            , {fmtHoursFromMin(preview.laborImpact.hypotheticalShiftOtMinutes)} OT
-                          </>
-                        ) : null}
+                      <li className="schedule-assign-labor-impact__stat">
+                        <span className="schedule-assign-labor-impact__label">This shift</span>
+                        <span className="schedule-assign-labor-impact__value">
+                          {fmtHoursFromMin(preview.laborImpact.hypotheticalShiftStraightMinutes)} straight
+                          {preview.laborImpact.hypotheticalShiftOtMinutes > 0 ? (
+                            <>
+                              <span className="schedule-assign-labor-impact__sep">,</span>{" "}
+                              {fmtHoursFromMin(preview.laborImpact.hypotheticalShiftOtMinutes)} OT
+                            </>
+                          ) : null}
+                        </span>
                       </li>
-                      <li>
-                        <span className="muted">Week labor</span> · {formatUsd(preview.laborImpact.baselineLaborUsd)} →{" "}
-                        {formatUsd(preview.laborImpact.projectedLaborUsd)}
+                      <li className="schedule-assign-labor-impact__stat">
+                        <span className="schedule-assign-labor-impact__label">Week labor</span>
+                        <span className="schedule-assign-labor-impact__value schedule-assign-labor-impact__value--transition">
+                          <span>{formatUsd(preview.laborImpact.baselineLaborUsd)}</span>
+                          <span className="schedule-assign-labor-impact__arrow" aria-hidden>
+                            →
+                          </span>
+                          <span>{formatUsd(preview.laborImpact.projectedLaborUsd)}</span>
+                        </span>
                       </li>
-                      <li>
-                        <span className="muted">Δ cost</span> ·{" "}
-                        <strong>{formatUsd(preview.laborImpact.deltaLaborUsd)}</strong>
+                      <li className="schedule-assign-labor-impact__stat schedule-assign-labor-impact__stat--delta">
+                        <span className="schedule-assign-labor-impact__label">Δ cost</span>
+                        <span className="schedule-assign-labor-impact__value schedule-assign-labor-impact__value--delta">
+                          {formatUsd(preview.laborImpact.deltaLaborUsd)}
+                        </span>
                       </li>
                     </ul>
                   </div>

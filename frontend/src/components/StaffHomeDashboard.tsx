@@ -194,10 +194,10 @@ export function StaffHomeDashboard({ token, userName }: StaffHomeDashboardProps)
       {openCalloutsQuery.data && openCalloutsQuery.data.length > 0 ? (
         <section className="staff-dash__open-callouts card" aria-labelledby="staff-open-callouts-title">
           <h2 id="staff-open-callouts-title" className="staff-dash__open-callouts-title">
-            Open shifts — claim now
+            Open shifts — volunteer
           </h2>
           <p className="staff-dash__open-callouts-hint muted">
-            A teammate called out. First eligible person to claim gets the shift (rules apply).
+            A teammate needs coverage. Claiming asks a manager to approve before you’re assigned (same rules as scheduling).
           </p>
           <ul className="staff-dash__open-callouts-list">
             {openCalloutsQuery.data.map((c) => (

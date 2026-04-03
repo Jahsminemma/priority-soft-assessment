@@ -42,7 +42,7 @@ enum CoverageRequestStatus {
   EXPIRED
 }
 
-/** DROP only: OPEN = short-fuse broadcast, first claim final; DIRECTED = managers assign, not shown to all staff. */
+/** DROP only: OPEN = broadcast to eligible staff; staff who claim need manager approval before assignment. DIRECTED = managers assign only. */
 enum CalloutMode {
   OPEN
   DIRECTED

@@ -44,7 +44,7 @@ export const ManagerCoverageQueueItemSchema = z.object({
   canApprove: z.boolean(),
   /** Present for DROP while still open for pickup. */
   expiresAt: z.string().nullable(),
-  /** DROP only: how the callout behaves. */
+  /** DROP only: OPEN = broadcast; staff claim → manager approves. DIRECTED = manager assigns only. */
   calloutMode: z.enum(["OPEN", "DIRECTED"]).nullable(),
   /** DROP PENDING: staff who can take this shift (for manager assign). */
   eligibleCandidates: z.array(z.object({ id: z.string().uuid(), name: z.string() })),

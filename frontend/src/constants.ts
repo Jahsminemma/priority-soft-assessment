@@ -1,10 +1,24 @@
-/** Stable UUIDs from backend/prisma/seed.ts — week data is seeded for the *current* ISO week at seed time. */
+/** Stable UUIDs from backend/prisma/seed.ts — week data is seeded for the *next* ISO week (Mon start) at seed time. */
 export const SEED: {
   sampleShiftId: string;
   shiftSfServerDraft: string;
   shiftSfServerPartial: string;
   shiftSfBartenderFull: string;
   shiftLaBartenderDraft: string;
+  shiftNyHost: string;
+  shiftNyServer: string;
+  shiftSfWedDrop: string;
+  shiftSfJamieOverlapA: string;
+  shiftSfJamieOverlapB: string;
+  shiftSfJamieRestMon: string;
+  shiftSfJamieRestTue: string;
+  shiftSfSatLongJamie: string;
+  shiftLaLineCookThu: string;
+  shiftSfOvernightFri: string;
+  shiftLaCaseyOtMon: string;
+  shiftBostonBartOpen: string;
+  shiftNyQuinnMonB: string;
+  shiftBostonTaylorMonB: string;
   staffSam: string;
   staffJordan: string;
   staffCasey: string;
@@ -14,6 +28,7 @@ export const SEED: {
   staffQuinn: string;
   staffTaylor: string;
   staffDrew: string;
+  staffEve: string;
   manager: string;
   admin: string;
 } = {
@@ -22,6 +37,20 @@ export const SEED: {
   shiftSfServerPartial: "d0000000-0000-4000-8000-000000000002",
   shiftSfBartenderFull: "d0000000-0000-4000-8000-000000000003",
   shiftLaBartenderDraft: "d0000000-0000-4000-8000-000000000004",
+  shiftNyHost: "d0000000-0000-4000-8000-000000000005",
+  shiftNyServer: "d0000000-0000-4000-8000-000000000006",
+  shiftSfWedDrop: "d0000000-0000-4000-8000-000000000007",
+  shiftSfJamieOverlapA: "d0000000-0000-4000-8000-000000000008",
+  shiftSfJamieOverlapB: "d0000000-0000-4000-8000-000000000009",
+  shiftSfJamieRestMon: "d0000000-0000-4000-8000-00000000000a",
+  shiftSfJamieRestTue: "d0000000-0000-4000-8000-00000000000b",
+  shiftSfSatLongJamie: "d0000000-0000-4000-8000-00000000000c",
+  shiftLaLineCookThu: "d0000000-0000-4000-8000-00000000000d",
+  shiftSfOvernightFri: "d0000000-0000-4000-8000-000000000019",
+  shiftLaCaseyOtMon: "d0000000-0000-4000-8000-00000000000e",
+  shiftBostonBartOpen: "d0000000-0000-4000-8000-000000000016",
+  shiftNyQuinnMonB: "d0000000-0000-4000-8000-000000000018",
+  shiftBostonTaylorMonB: "d0000000-0000-4000-8000-000000000015",
   staffSam: "c0000000-0000-4000-8000-000000000010",
   staffJordan: "c0000000-0000-4000-8000-000000000011",
   staffCasey: "c0000000-0000-4000-8000-000000000012",
@@ -31,6 +60,7 @@ export const SEED: {
   staffQuinn: "c0000000-0000-4000-8000-000000000016",
   staffTaylor: "c0000000-0000-4000-8000-000000000017",
   staffDrew: "c0000000-0000-4000-8000-000000000018",
+  staffEve: "c0000000-0000-4000-8000-000000000019",
   manager: "c0000000-0000-4000-8000-000000000002",
   admin: "c0000000-0000-4000-8000-000000000001",
 };

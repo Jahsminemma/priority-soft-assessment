@@ -16,7 +16,7 @@ import { bumpScheduleContentRevisionsForShifts } from "../schedule/scheduleRevis
 
 const MAX_PENDING = 3;
 
-/** If shift starts within this window, DROP is OPEN (broadcast + first claim final). */
+/** If shift starts within this window, DROP is OPEN (broadcast; staff claims require manager approval). */
 const OPEN_CALLOUT_THRESHOLD_MS = 60 * 60 * 1000;
 
 function computeDropExpiresAt(shiftStartUtc: Date): Date {
@@ -240,6 +240,93 @@ async function distinctManagerUserIdsForLocations(locationIds: string[]): Promis
   return [...new Set(rows.map((r) => r.userId))];
 }
 
+export type ClaimOpenDropFailure = { ok: false; code: string; messages?: string[] };
+
+/**
+ * Staff claims an OPEN callout: records them as target and ACCEPTED; manager must approve before assignment moves.
+ * Constraints are checked now (claim) and again at approval time.
+ */
+export async function staffClaimOpenDropForManagerApproval(
+  requestId: string,
+  actorId: string,
+): Promise<{ ok: true } | ClaimOpenDropFailure> {
+  await expireStaleCoverageRequests();
+  const req = await prisma.coverageRequest.findUniqueOrThrow({
+    where: { id: requestId },
+    include: {
+      shift: { include: { location: true, requiredSkill: true } },
+      requester: { select: { name: true } },
+    },
+  });
+  if (req.type !== "DROP") return { ok: false, code: "INVALID" };
+  if (req.status !== "PENDING") return { ok: false, code: "NOT_PENDING" };
+  if (req.targetId !== null) return { ok: false, code: "CONFLICT" };
+  if ((req.calloutMode ?? "DIRECTED") !== "OPEN") return { ok: false, code: "DIRECTED_USE_ASSIGN" };
+  if (req.requesterId === actorId) return { ok: false, code: "SELF" };
+
+  if (!(await isStaffEligibleForShift(actorId, req.shiftId))) {
+    return { ok: false, code: "NOT_ELIGIBLE" };
+  }
+  const ctx = await buildConstraintContext(req.shiftId, actorId);
+  const { hard } = evaluateAssignmentConstraints(ctx, {});
+  if (hard.length > 0) {
+    return { ok: false, code: "CONSTRAINTS", messages: hard.map((h) => h.message) };
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const n = await tx.coverageRequest.updateMany({
+        where: {
+          id: requestId,
+          status: "PENDING",
+          targetId: null,
+          type: "DROP",
+          calloutMode: "OPEN",
+        },
+        data: { targetId: actorId, status: "ACCEPTED" },
+      });
+      if (n.count !== 1) throw new Error("CONFLICT");
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actorId,
+          entityType: "CoverageRequest",
+          entityId: requestId,
+          action: "CLAIM_OPEN_DROP_PENDING",
+          afterJson: {
+            shiftId: req.shiftId,
+            requesterId: req.requesterId,
+            proposedTargetId: actorId,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "CONFLICT") return { ok: false, code: "CONFLICT" };
+    throw e;
+  }
+
+  await createNotification(req.requesterId, "coverage.accepted", {
+    requestId,
+    shiftId: req.shiftId,
+    secondShiftId: undefined,
+  });
+  await createNotification(actorId, "coverage.drop_claim_pending", {
+    requestId,
+    shiftId: req.shiftId,
+  });
+  const managerUserIds = await distinctManagerUserIdsForLocations([req.shift.locationId]);
+  for (const uid of managerUserIds) {
+    await createNotification(uid, "coverage.ready_for_approval", {
+      requestId,
+      shiftId: req.shiftId,
+      secondShiftId: undefined,
+    });
+  }
+  emitCoverageUpdated(req.shift.locationId, { requestId, status: "ACCEPTED", type: "DROP" });
+  return { ok: true };
+}
+
 export async function createCoverageRequest(
   requesterId: string,
   input: CreateCoverageRequest,
@@ -437,8 +524,8 @@ export async function createCoverageRequest(
 export type FinalizeDropFailure = { ok: false; code: string; messages?: string[] };
 
 /**
- * Final DROP: move assignment from requester to target in one transaction (no separate manager approval).
- * OPEN: staff may only claim for themselves; managers may assign any eligible staff.
+ * Final DROP: move assignment from requester to target in one transaction.
+ * OPEN: only managers/admins may call this (direct assign). Staff use claim → manager approval.
  * DIRECTED: only managers/admins may assign.
  */
 export async function finalizeDropWithTarget(
@@ -468,9 +555,9 @@ export async function finalizeDropWithTarget(
     }
   } else {
     if (actor.role === "STAFF") {
-      if (actor.id !== targetUserId) return { ok: false, code: "FORBIDDEN" };
-      if (actor.id === req.requesterId) return { ok: false, code: "SELF" };
-    } else if (actor.role === "ADMIN" || actor.role === "MANAGER") {
+      return { ok: false, code: "FORBIDDEN" };
+    }
+    if (actor.role === "ADMIN" || actor.role === "MANAGER") {
       if (!(await managerMayApproveCoverage(actor.id, req.shift.locationId, null))) {
         return { ok: false, code: "FORBIDDEN" };
       }
@@ -527,7 +614,7 @@ export async function finalizeDropWithTarget(
           actorUserId: actor.id,
           entityType: "CoverageRequest",
           entityId: requestId,
-          action: mode === "OPEN" && actor.role === "STAFF" ? "CLAIM_DROP" : "MANAGER_ASSIGN_DROP",
+          action: "MANAGER_ASSIGN_DROP",
           afterJson: {
             shiftId: req.shiftId,
             requesterId: req.requesterId,
@@ -623,7 +710,7 @@ export async function acceptCoverageRequest(
     if (mode === "DIRECTED") {
       return { ok: false, code: "DIRECTED_USE_ASSIGN" };
     }
-    return finalizeDropWithTarget(requestId, actorId, { id: actorId, role: "STAFF" });
+    return staffClaimOpenDropForManagerApproval(requestId, actorId);
   }
 
   return { ok: false, code: "INVALID" };
@@ -788,9 +875,18 @@ export async function approveCoverageRequest(
         where: { shiftId: req.shiftId, staffUserId: req.requesterId },
       });
       if (del.count !== 1) throw new Error("NO_ASSIGNMENT");
-      const created = await tx.shiftAssignment.create({
-        data: { shiftId: req.shiftId, staffUserId: targetId, status: "ASSIGNED" },
+      const existingForTarget = await tx.shiftAssignment.findFirst({
+        where: { shiftId: req.shiftId, staffUserId: targetId, status: "ASSIGNED" },
       });
+      let assignmentId: string;
+      if (existingForTarget) {
+        assignmentId = existingForTarget.id;
+      } else {
+        const created = await tx.shiftAssignment.create({
+          data: { shiftId: req.shiftId, staffUserId: targetId, status: "ASSIGNED" },
+        });
+        assignmentId = created.id;
+      }
       await tx.coverageRequest.update({
         where: { id: requestId },
         data: { status: "MANAGER_APPROVED" },
@@ -804,11 +900,18 @@ export async function approveCoverageRequest(
           afterJson: { shiftId: req.shiftId, requesterId: req.requesterId, targetId } as Prisma.InputJsonValue,
         },
       });
-      return created.id;
+      return assignmentId;
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg === "NO_ASSIGNMENT") return { ok: false, code: "NO_ASSIGNMENT" };
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        messages: ["That person is already assigned to this shift."],
+      };
+    }
     throw e;
   }
 

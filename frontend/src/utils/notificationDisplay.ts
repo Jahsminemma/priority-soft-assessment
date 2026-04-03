@@ -67,8 +67,8 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
       const requesterName = str(p.requesterName) ?? "A coworker";
       const take = shiftLine(p.theirShift);
       return withOptionalRequestId(
-        "Open shift — claim now",
-        `${requesterName} needs coverage. First eligible person to claim gets it (schedule rules apply).\n\n${take ?? "Shift"}\n\nIf someone else claims first, this alert will show as filled.`,
+        "Open shift — volunteer",
+        `${requesterName} needs coverage. If you claim, a manager must approve before you’re assigned (schedule rules apply).\n\n${take ?? "Shift"}\n\nOnly one person can be pending at a time for this offer.`,
         requestId,
       );
     }
@@ -78,7 +78,7 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
       if (kind === "DROP") {
         return withOptionalRequestId(
           "Staff offered a shift (pickup)",
-          "Someone posted a shift they can’t work. Review the schedule and watch for a follow-up when someone offers to cover.",
+          "Someone posted a shift they can’t work. Eligible staff may claim it; you approve before the assignment moves.",
           requestId,
         );
       }
@@ -108,7 +108,14 @@ export function formatNotificationForDisplay(type: string, payload: unknown): No
     case "coverage.ready_for_approval":
       return withOptionalRequestId(
         "Ready for your approval",
-        "The teammate has accepted. Review and tap Approve to finalize the schedule change.",
+        "A teammate accepted a swap or claimed an open shift. Review and tap Approve to finalize (rules are checked again at approval).",
+        requestId,
+      );
+
+    case "coverage.drop_claim_pending":
+      return withOptionalRequestId(
+        "Claim recorded — manager approval needed",
+        "You volunteered for an open shift. You are not assigned yet. A manager must approve before it appears on your schedule.",
         requestId,
       );
       

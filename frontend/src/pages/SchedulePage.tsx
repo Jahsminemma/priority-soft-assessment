@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DateTime } from "luxon";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -54,7 +54,18 @@ export default function SchedulePage(): React.ReactElement {
   const { token, user } = useAuth();
   const canManage = user?.role === "ADMIN" || user?.role === "MANAGER";
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  /** Deep links from Manage shifts use ?locationId & ?weekKey & ?focusShiftId. Clear after any local interaction so the URL does not keep overriding location/week. */
+  const clearScheduleUrlParams = useCallback((): void => {
+    setSearchParams(
+      (prev) => {
+        if (prev.toString() === "") return prev;
+        return new URLSearchParams();
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
   const [locationId, setLocationId] = useState("");
   const [highlightShiftId, setHighlightShiftId] = useState<string | null>(null);
   const [weekKey, setWeekKey] = useState(() => normalizeIsoWeekKey(initialWeekKeyFromToday()));
@@ -169,10 +180,12 @@ export default function SchedulePage(): React.ReactElement {
   useEffect(() => {
     if (compareIsoWeekKeys(weekKey, minWeekKey) < 0) {
       setWeekKey(minWeekKey);
+      clearScheduleUrlParams();
     }
-  }, [weekKey, minWeekKey]);
+  }, [weekKey, minWeekKey, clearScheduleUrlParams]);
 
   const openCreateShiftForDay = (ymd: string): void => {
+    clearScheduleUrlParams();
     const mon = weekKeyMondayYmdInZone(weekKey, locationTz) ?? weekKeyToLocalMondayYmd(weekKey);
     if (!mon) return;
     const sun = addDaysYmd(mon, 6);
@@ -413,8 +426,67 @@ export default function SchedulePage(): React.ReactElement {
     );
   }
 
+  const scheduleToolbarStatusNote =
+    (scheduleQueriesSettledForSelectedWeek &&
+      weekStateQuery.data?.weekRowStatus === "PUBLISHED" &&
+      !weekHasCutoffLocked) ||
+    showCutoffLockBanner ? (
+      <>
+        {scheduleQueriesSettledForSelectedWeek &&
+        weekStateQuery.data?.weekRowStatus === "PUBLISHED" &&
+        !weekHasCutoffLocked ? (
+          <span
+            className="schedule-cal__status-chip schedule-cal__status-chip--ok"
+            role="status"
+            title="You can freely edit or unpublish this schedule — all shifts are still outside the edit cutoff window."
+          >
+            <svg
+              className="schedule-cal__status-chip-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4M12 8h.01" strokeLinecap="round" />
+            </svg>
+            <span>Outside cutoff · edits OK</span>
+          </span>
+        ) : null}
+        {showCutoffLockBanner ? (
+          <span
+            className="schedule-cal__status-chip schedule-cal__status-chip--warn"
+            role="status"
+            title="This schedule is locked for shifts within the configured cutoff (default: 48 hours before start). For urgent changes, document an emergency override reason in the dialogs below, use Notifications (coverage actions), or ask an administrator."
+          >
+            <svg
+              className="schedule-cal__status-chip-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+              />
+              <path strokeLinecap="round" d="M12 9v4M12 17h.01" />
+            </svg>
+            <span>Cutoff lock · overrides</span>
+          </span>
+        ) : null}
+      </>
+    ) : undefined;
+
   return (
-    <div className="page">
+    <div className="page page--schedule">
       <FeedbackModal
         open={publishSuccessInfo !== null}
         variant="success"
@@ -426,39 +498,21 @@ export default function SchedulePage(): React.ReactElement {
         }
         onClose={() => setPublishSuccessInfo(null)}
       />
-      <h1 className="page__title">Schedule & shifts</h1>
-      <p className="page__lead muted">
-        Choose location and week in the calendar header, add shifts from a day column, and assign people from a staff
-        cell (<strong>+</strong>).
-      </p>
-
-      {scheduleQueriesSettledForSelectedWeek &&
-      weekStateQuery.data?.weekRowStatus === "PUBLISHED" &&
-      !weekHasCutoffLocked ? (
-        <div className="card schedule-week-banner schedule-week-banner--ok">
-          <p className="schedule-week-banner__text">
-            You can freely edit or unpublish this schedule — all shifts are still outside the edit cutoff window.
-          </p>
-        </div>
-      ) : null}
-
-      {showCutoffLockBanner ? (
-        <div className="card schedule-week-banner schedule-week-banner--warn">
-          <p className="schedule-week-banner__text">
-            This schedule is <strong>locked</strong> for shifts within the configured cutoff (default: 48 hours before
-            start). For urgent changes, document an <strong>emergency override reason</strong> in the dialogs below, use{" "}
-            <strong>Notifications</strong> (coverage actions), or ask an administrator.
-          </p>
-        </div>
-      ) : null}
+      <h1 className="visually-hidden">Schedule & shifts</h1>
 
       <ScheduleWeekCalendar
         locations={locationsQuery.data ?? []}
         locationId={locationId}
-        onLocationChange={setLocationId}
+        onLocationChange={(id) => {
+          clearScheduleUrlParams();
+          setLocationId(id);
+        }}
         locationsLoading={locationsQuery.isLoading}
         weekKey={weekKey}
-        onWeekKeyChange={setWeekKey}
+        onWeekKeyChange={(wk) => {
+          clearScheduleUrlParams();
+          setWeekKey(wk);
+        }}
         minWeekKey={minWeekKey}
         locationTz={locationTz}
         highlightShiftId={highlightShiftId}
@@ -470,8 +524,12 @@ export default function SchedulePage(): React.ReactElement {
         staffRows={staffRows}
         rosterLoading={rosterLoading}
         onDayAddShift={(ymd) => openCreateShiftForDay(ymd)}
-        onCellAssign={(staff, dayYmd) => setAssignCell({ staff, dayYmd })}
+        onCellAssign={(staff, dayYmd) => {
+          clearScheduleUrlParams();
+          setAssignCell({ staff, dayYmd });
+        }}
         onRemoveAssignment={(assignmentId) => {
+          clearScheduleUrlParams();
           if (weekHasCutoffLocked && user?.role === "MANAGER") {
             setRemoveEmergencyReason("");
             setRemoveAssignmentModalId(assignmentId);
@@ -480,7 +538,11 @@ export default function SchedulePage(): React.ReactElement {
           void removeAssignmentMut.mutateAsync({ assignmentId });
         }}
         removeAssignmentPending={removeAssignmentMut.isPending}
-        onEditShift={(s) => setEditShift(s)}
+        onEditShift={(s) => {
+          clearScheduleUrlParams();
+          setEditShift(s);
+        }}
+        toolbarStatusNote={scheduleToolbarStatusNote}
         headerActions={
           <div className="btn-row schedule-publish-actions">
             <button
@@ -488,6 +550,7 @@ export default function SchedulePage(): React.ReactElement {
               className="btn btn--secondary btn--sm"
               disabled={!locationId || unpublishMut.isPending}
               onClick={() => {
+                clearScheduleUrlParams();
                 if (weekHasCutoffLocked && user?.role === "MANAGER") {
                   setUnpublishEmergencyReason("");
                   setUnpublishModalOpen(true);
@@ -511,13 +574,14 @@ export default function SchedulePage(): React.ReactElement {
                   ? "This week is already published. Change shifts or assignments, or unpublish, before publishing again."
                   : undefined
               }
-              onClick={() =>
+              onClick={() => {
+                clearScheduleUrlParams();
                 void publishMut.mutateAsync({
                   locationId,
                   weekKey,
                   siteName: selectedLocation?.name ?? "This site",
-                })
-              }
+                });
+              }}
             >
               {publishMut.isPending ? "Publishing…" : "Publish week"}
             </button>
@@ -642,7 +706,10 @@ export default function SchedulePage(): React.ReactElement {
                   unpublishMut.isPending ||
                   unpublishEmergencyReason.trim().length < EMERGENCY_OVERRIDE_MIN_LEN
                 }
-                onClick={() => void unpublishMut.mutateAsync(unpublishEmergencyReason)}
+                onClick={() => {
+                  clearScheduleUrlParams();
+                  void unpublishMut.mutateAsync(unpublishEmergencyReason);
+                }}
               >
                 {unpublishMut.isPending ? "Unpublishing…" : "Confirm unpublish"}
               </button>
@@ -685,6 +752,7 @@ export default function SchedulePage(): React.ReactElement {
                 }
                 onClick={() => {
                   if (!removeAssignmentModalId) return;
+                  clearScheduleUrlParams();
                   void removeAssignmentMut.mutateAsync({
                     assignmentId: removeAssignmentModalId,
                     emergencyOverrideReason: removeEmergencyReason.trim(),
