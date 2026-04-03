@@ -239,7 +239,7 @@ Stale `PENDING` DROP rows are cleaned up when coverage endpoints run (`expireSta
 ### Consecutive work days and the 7th day
 
 - **Consecutive days** are **calendar days** in the **location timezone** where the staff member has **any** work (including partial days from overnight splits). **Hours do not matter** — a short shift counts the same as a long one for this streak.  
-- The streak is computed **within the ISO week** that contains the **proposed shift’s start** (same week window used for other weekly rules): we take all calendar days that have shift time in that week, sort them, and take the **longest run** of consecutive dates.  
+- The streak is computed **within the ISO week** that contains the **proposed shift’s start** (same week window used for other weekly rules): I take all calendar days that have shift time in that week, sort them, and take the **longest run** of consecutive dates.  
 - **6th consecutive day** → **warning** (`CONSECUTIVE_SIXTH_DAY`).  
 - **7th consecutive day** → **hard block** unless **`seventhDayOverrideReason`** is provided (manager-documented); when allowed, a **warning** confirms the override is **stored on assignment audit** (and visible in shift history / admin tooling as implemented).
 
@@ -263,4 +263,4 @@ Stale `PENDING` DROP rows are cleaned up when coverage endpoints run (`expireSta
 
 ## Notes
 
-These rules are applied **consistently** in domain logic (`backend/src/domain/…`), application services, and API routes, with the SPA surfacing validation messages and required fields. If something in the brief could be read two ways, the behavior above is the one the code implements.
+I applied these rules **consistently** in domain logic (`backend/src/domain/…`), application services, and API routes, with the SPA surfacing validation messages and required fields. If something in the brief could be read two ways, the behavior above is the one the code implements.
