@@ -73,7 +73,7 @@ flowchart TB
     MW(["Middleware"]):::component
     RT(["Router"]):::component
     APP(["Application Logic"]):::logic
-    DOM(["Domain Controller"]):::logic
+    DOM(["Domain services"]):::logic
     SIOs(["Socket.IO Server"]):::socket
     EXP --> MW --> RT --> APP --> DOM
     EXP --> SIOs
@@ -163,86 +163,104 @@ Focus is on domain logic and services; no full end-to-end test suite.
 
 ## Assumptions (Ambiguous Requirements)
 
-The following rules were defined to resolve unspecified behaviors in the brief:
-
-### Coverage (Callout / Drop Logic)
-
-- **OPEN vs DIRECTED**:
-  - OPEN only if shift starts within **1 hour and hasn’t started**
-  - Otherwise DIRECTED (manager-controlled)
-- **Not day-dependent**:
-  - Based strictly on **time-to-shift**, not weekday/weekend
-- **Expiry logic**:
-  - Default: 24 hours before shift  
-  - Otherwise clamped between:
-    - ≥ 30 seconds from now  
-    - ≤ 1 minute before shift start
-- **Pickup flow**:
-  - Staff claims require **manager approval**
+Where the product brief left behavior unspecified, the implementation follows the rules below. They are enforced in **backend validation** (source of truth) and reflected in the **UI** (warnings, errors, and required fields).
 
 ---
 
-### Schedule Cutoff
+### Coverage — drops (callouts), swaps, and manager queue
 
-- Default **48-hour cutoff**
-- Inside cutoff:
-  - Requires **override reason (min 10 characters)** or admin action
+**Drops vs swaps**  
+- A **DROP** is “I cannot work this shift” (callout).  
+- A **SWAP** is a peer-to-peer trade (one-way or two-way). Swaps create **pending** coverage requests and notify managers; they do **not** use the same OPEN/DIRECTED broadcast rule as drops.
 
----
+**OPEN vs DIRECTED (DROP only)**  
+When a staff member requests a drop, the system sets `calloutMode` from **time until shift start**:
 
-### Time & Timezones
+| Condition | Mode | Meaning |
+| --- | --- | --- |
+| Shift **has not started** and starts in **≤ 1 hour** | `OPEN` | Eligible staff at that location (skill + certification, excluding the requester) get a **broadcast** notification. |
+| Otherwise (more than 1 hour away, or already started) | `DIRECTED` | No staff broadcast; **managers** assign a replacement through the coverage flow. |
 
-- All logic uses **location timezone (`tzIana`)**
-- DST handled via timezone-aware calculations
-- Overnight shifts span midnight but are treated as **single shifts**
-- Weeks follow **ISO standard (Monday start)** per location
+- The rule is based only on **milliseconds until `startAtUtc`** — not on weekday, season, or location-specific “policy days.”
 
----
+**DROP expiry (`expiresAt`)**  
+The request auto-expires at a computed time so stale callouts do not linger:
 
-### Overtime Calculation
+1. If **24 hours before shift start** is still **in the future**, that instant is used (typical for early callouts).  
+2. Otherwise (late callout), expiry is **`min( shift start, max( one minute before shift start, now + 30 seconds ) )`** — i.e. at least **30 seconds** from creation, never **after** the shift starts, and (when the math allows) not **before** one minute prior to start.
 
-- Overtime = **hours beyond 40 per ISO week**
-- Paid at **1.5× rate**
-- **FIFO allocation**:
-  - Earlier shifts consume regular hours first
-  - Later shifts push into overtime
+Stale `PENDING` DROP rows are cleaned up when coverage endpoints run (`expireStaleCoverageRequests`).
 
----
+**Who can fill the shift**  
+- **OPEN**: A staff member may **claim** the open drop (recorded as pending); a **manager must approve** before the assignment moves.  
+- **DIRECTED**: Replacement is **manager/admin driven** (direct assignment / finalize with target), not a free-for-all claim by any staff.
 
-### Consecutive Days
-
-- Based on **days worked**, not hours worked  
-- A **1-hour shift counts the same as an 11-hour shift** for consecutive day tracking
-
----
-
-### 7th Day Rule
-
-- Blocked unless:
-  - Manager provides **override reason**
-  - Stored in audit trail
+**Limits**  
+- A user may have at most **3** open swap or drop requests in a “waiting” state (coworker or manager), to keep the queue manageable.
 
 ---
 
-### Concurrency Handling
+### Schedule cutoff (published weeks)
 
-- **Idempotency keys** prevent duplicate assignments  
-- **Serializable transactions** ensure:
-  - No over-assignment
-  - No race-condition double booking
-- Conflicts:
-  - One request succeeds  
-  - Others fail with retry prompt
+**Default**  
+- **`cutoffHours`** defaults to **48** per published schedule week (stored on the schedule-week row; seed uses 48).
+
+**What “inside the cutoff” means**  
+- For a given shift, the edit window closes when **now ≥ shift start − cutoffHours** (UTC timestamps).  
+- For **week-level** actions (e.g. whether **any** shift in the week is “locked”), the same rule applies **per shift**; if **any** shift in that ISO week crosses the threshold, manager-only actions may require an **emergency override**.
+
+**Managers vs admins**  
+- **Managers** past cutoff must supply a valid **`emergencyOverrideReason`** (trimmed length **≥ 10**) on the relevant API calls (assignments, unpublish, etc.), unless the product allows another path (e.g. coverage notifications as documented in errors).  
+- **Admins** are not subject to the manager cutoff gate for those operations.
+
+**Publishing**  
+- Publishing stores the cutoff hours for that week; the UI and API use it consistently for lock detection.
 
 ---
 
-### Notifications
+### Time, timezones, and “weeks”
 
-- No real email provider  
-- “Email” is simulated within stored notification payloads
+- **Location timezone** (`tzIana`) drives: shift display, “which calendar day” a shift belongs to, daily hour totals, and weekly buckets. Calculations use **Luxon** with explicit zones rather than naive local strings.  
+- **Overnight shifts** are one shift record; hours can **split across local calendar days** for **daily** limits (segments per local midnight).  
+- **Weekly** overtime and warnings use the **ISO week** (Monday start) in the **location** timezone for the anchor shift.  
+- **Database / API** times are stored in **UTC**; the UI converts for display.
+
+---
+
+### Overtime and weekly hour warnings (projection)
+
+- **Straight time** is capped at **40 hours** per ISO week (per location week model used in constraints).  
+- Hours beyond 40 are treated as **overtime** at **1.5×** for **cost projection** (not a payroll system).  
+- **FIFO by shift start time** (earlier shifts consume the 40h bucket first); later shifts push incremental hours into OT in previews.  
+- **Warnings** (not hard blocks): **35h+** and **40h+** weekly thresholds (`WEEKLY_WARN_35`, `WEEKLY_WARN_40`) to surface risk before assignment commit.
+
+---
+
+### Consecutive work days and the 7th day
+
+- **Consecutive days** are **calendar days** in the **location timezone** where the staff member has **any** work (including partial days from overnight splits). **Hours do not matter** — a short shift counts the same as a long one for this streak.  
+- The streak is computed **within the ISO week** that contains the **proposed shift’s start** (same week window used for other weekly rules): we take all calendar days that have shift time in that week, sort them, and take the **longest run** of consecutive dates.  
+- **6th consecutive day** → **warning** (`CONSECUTIVE_SIXTH_DAY`).  
+- **7th consecutive day** → **hard block** unless **`seventhDayOverrideReason`** is provided (manager-documented); when allowed, a **warning** confirms the override is **stored on assignment audit** (and visible in shift history / admin tooling as implemented).
+
+---
+
+### Concurrency and duplicate submits
+
+- **Assignment commits** use a **Prisma transaction** with isolation level **`Serializable`** so concurrent assigns cannot oversubscribe headcount or double-book the same user in ways the constraints prevent.  
+- Clients send an **`idempotencyKey`** (shared schema: min 8, max 128 chars). The server **persists** the first successful result for that key; **retries with the same key** return the **same outcome** instead of creating duplicate rows.  
+- If two different clients race legitimately, one may **fail** (e.g. conflict or constraint); the user can **retry** with a new key after fixing state.
+
+---
+
+### Notifications and “email”
+
+- There is **no** external SMTP/SendGrid/etc. integration.  
+- **In-app** notifications are first-class.  
+- **Email** is **simulated**: payloads can include email-like metadata for demos, and in development, relevant details may be **logged** for inspection — not delivered to real inboxes.
 
 ---
 
 ## Notes
 
-All assumptions are **consistently enforced across backend validation and UI feedback**, ensuring predictable and transparent system behavior.
+These rules are applied **consistently** in domain logic (`backend/src/domain/…`), application services, and API routes, with the SPA surfacing validation messages and required fields. If something in the brief could be read two ways, the behavior above is the one the code implements.
