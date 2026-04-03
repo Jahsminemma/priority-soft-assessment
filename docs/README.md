@@ -111,7 +111,7 @@ flowchart TB
 
 
 
-## What I Implemented 
+## What I Implemented
 
 - **Auth & Roles**: JWT-based authentication with **ADMIN / MANAGER / STAFF** roles and location-scoped access  
 - **Scheduling**: Shift creation, assignment, publish/unpublish with **48-hour cutoff** and emergency override  
@@ -170,32 +170,37 @@ Where the product brief left behavior unspecified, the implementation follows th
 ### Coverage — drops (callouts), swaps, and manager queue
 
 **Drops vs swaps**  
+
 - A **DROP** is “I cannot work this shift” (callout).  
 - A **SWAP** is a peer-to-peer trade (one-way or two-way). Swaps create **pending** coverage requests and notify managers; they do **not** use the same OPEN/DIRECTED broadcast rule as drops.
 
 **OPEN vs DIRECTED (DROP only)**  
 When a staff member requests a drop, the system sets `calloutMode` from **time until shift start**:
 
-| Condition | Mode | Meaning |
-| --- | --- | --- |
-| Shift **has not started** and starts in **≤ 1 hour** | `OPEN` | Eligible staff at that location (skill + certification, excluding the requester) get a **broadcast** notification. |
-| Otherwise (more than 1 hour away, or already started) | `DIRECTED` | No staff broadcast; **managers** assign a replacement through the coverage flow. |
+
+| Condition                                             | Mode       | Meaning                                                                                                            |
+| ----------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| Shift **has not started** and starts in **≤ 1 hour**  | `OPEN`     | Eligible staff at that location (skill + certification, excluding the requester) get a **broadcast** notification. |
+| Otherwise (more than 1 hour away, or already started) | `DIRECTED` | No staff broadcast; **managers** assign a replacement through the coverage flow.                                   |
+
 
 - The rule is based only on **milliseconds until `startAtUtc`** — not on weekday, season, or location-specific “policy days.”
 
 **DROP expiry (`expiresAt`)**  
 The request auto-expires at a computed time so stale callouts do not linger:
 
-1. If **24 hours before shift start** is still **in the future**, that instant is used (typical for early callouts).  
-2. Otherwise (late callout), expiry is **`min( shift start, max( one minute before shift start, now + 30 seconds ) )`** — i.e. at least **30 seconds** from creation, never **after** the shift starts, and (when the math allows) not **before** one minute prior to start.
+1. If **24 hours before shift start** is still **in the future**, that instant is used (typical for early callouts).
+2. Otherwise (late callout), expiry is `**min( shift start, max( one minute before shift start, now + 30 seconds ) )`** — i.e. at least **30 seconds** from creation, never **after** the shift starts, and (when the math allows) not **before** one minute prior to start.
 
 Stale `PENDING` DROP rows are cleaned up when coverage endpoints run (`expireStaleCoverageRequests`).
 
 **Who can fill the shift**  
+
 - **OPEN**: A staff member may **claim** the open drop (recorded as pending); a **manager must approve** before the assignment moves.  
 - **DIRECTED**: Replacement is **manager/admin driven** (direct assignment / finalize with target), not a free-for-all claim by any staff.
 
 **Limits**  
+
 - A user may have at most **3** open swap or drop requests in a “waiting” state (coworker or manager), to keep the queue manageable.
 
 ---
@@ -203,17 +208,21 @@ Stale `PENDING` DROP rows are cleaned up when coverage endpoints run (`expireSta
 ### Schedule cutoff (published weeks)
 
 **Default**  
-- **`cutoffHours`** defaults to **48** per published schedule week (stored on the schedule-week row; seed uses 48).
+
+- `**cutoffHours`** defaults to **48** per published schedule week (stored on the schedule-week row; seed uses 48).
 
 **What “inside the cutoff” means**  
+
 - For a given shift, the edit window closes when **now ≥ shift start − cutoffHours** (UTC timestamps).  
 - For **week-level** actions (e.g. whether **any** shift in the week is “locked”), the same rule applies **per shift**; if **any** shift in that ISO week crosses the threshold, manager-only actions may require an **emergency override**.
 
 **Managers vs admins**  
-- **Managers** past cutoff must supply a valid **`emergencyOverrideReason`** (trimmed length **≥ 10**) on the relevant API calls (assignments, unpublish, etc.), unless the product allows another path (e.g. coverage notifications as documented in errors).  
+
+- **Managers** past cutoff must supply a valid `**emergencyOverrideReason`** (trimmed length **≥ 10**) on the relevant API calls (assignments, unpublish, etc.), unless the product allows another path (e.g. coverage notifications as documented in errors).  
 - **Admins** are not subject to the manager cutoff gate for those operations.
 
 **Publishing**  
+
 - Publishing stores the cutoff hours for that week; the UI and API use it consistently for lock detection.
 
 ---
@@ -241,14 +250,14 @@ Stale `PENDING` DROP rows are cleaned up when coverage endpoints run (`expireSta
 - **Consecutive days** are **calendar days** in the **location timezone** where the staff member has **any** work (including partial days from overnight splits). **Hours do not matter** — a short shift counts the same as a long one for this streak.  
 - The streak is computed **within the ISO week** that contains the **proposed shift’s start** (same week window used for other weekly rules): I take all calendar days that have shift time in that week, sort them, and take the **longest run** of consecutive dates.  
 - **6th consecutive day** → **warning** (`CONSECUTIVE_SIXTH_DAY`).  
-- **7th consecutive day** → **hard block** unless **`seventhDayOverrideReason`** is provided (manager-documented); when allowed, a **warning** confirms the override is **stored on assignment audit** (and visible in shift history / admin tooling as implemented).
+- **7th consecutive day** → **hard block** unless `**seventhDayOverrideReason`** is provided (manager-documented); when allowed, a **warning** confirms the override is **stored on assignment audit** (and visible in shift history / admin tooling as implemented).
 
 ---
 
 ### Concurrency and duplicate submits
 
-- **Assignment commits** use a **Prisma transaction** with isolation level **`Serializable`** so concurrent assigns cannot oversubscribe headcount or double-book the same user in ways the constraints prevent.  
-- Clients send an **`idempotencyKey`** (shared schema: min 8, max 128 chars). The server **persists** the first successful result for that key; **retries with the same key** return the **same outcome** instead of creating duplicate rows.  
+- **Assignment commits** use a **Prisma transaction** with isolation level `**Serializable`** so concurrent assigns cannot oversubscribe headcount or double-book the same user in ways the constraints prevent.  
+- Clients send an `**idempotencyKey**` (shared schema: min 8, max 128 chars). The server **persists** the first successful result for that key; **retries with the same key** return the **same outcome** instead of creating duplicate rows.  
 - If two different clients race legitimately, one may **fail** (e.g. conflict or constraint); the user can **retry** with a new key after fixing state.
 
 ---
@@ -258,6 +267,70 @@ Stale `PENDING` DROP rows are cleaned up when coverage endpoints run (`expireSta
 - There is **no** external SMTP/SendGrid/etc. integration.  
 - **In-app** notifications are first-class.  
 - **Email** is **simulated**: payloads can include email-like metadata for demos, and in development, relevant details may be **logged** for inspection — not delivered to real inboxes.
+
+---
+
+## Decisions on intentional ambiguities 
+
+The assessment brief called out several **deliberately unspecified** behaviors. Here is how my implementation resolves them.
+
+### 1. Historical data when a staff member is de-certified from a location
+
+**Decision:** **Do not retroactively delete or rewrite past assignments.** Certification is a **current** gate for **new** work and for **validating changes** to existing schedules.
+
+**Behavior:**
+
+- **Admin** updates to a staff member’s certified locations (`PATCH …/staff/:userId/locations`) **replace** `StaffCertification` rows; **existing `ShiftAssignment` rows are left unchanged** (no automatic cascade delete).
+- **Past assignments** remain in the database as historical records; the UI can still show them.
+- **New** assignments to that location **fail** the certification check (`NOT_CERTIFIED`).
+- If a manager (or admin) **edits that shift** (times, headcount, etc.) while someone is still assigned, `updateShift` **re-runs** full constraint checks for **every** assigned staff member. If certification was removed, the edit **fails** until the conflict is resolved (e.g. remove the assignment or restore certification).
+
+So: **history is preserved**, but **mutating** the schedule without fixing the inconsistency is **blocked** by validation.
+
+---
+
+### 2. How “desired hours” interact with availability windows
+
+**Decision:** **They are independent.** **Desired hours** are a **planning / fairness target**; **availability** is a **hard scheduling constraint**.
+
+**Behavior:**
+
+- `**desiredHoursWeekly`** on the user profile is used in **analytics** and **fairness** views. It is **not** read inside `evaluateAssignmentConstraints` for allow/deny.
+- **Recurring availability rules** and **exceptions** (unavailable / overrides) **are** enforced as hard constraints when assigning or when editing shifts with existing assignments.
+
+A staff member can be **below** desired hours but **blocked** by availability, or **above** desired hours with no automatic “cap” from that field alone (weekly overtime **warnings** are separate).
+
+---
+
+### 3. Consecutive days: 1-hour shift vs 11-hour shift
+
+**Decision:** **Same weight.** Consecutive work streaks use **calendar days** in the **location timezone** where the person has **any** assigned work; **duration does not change the count.**
+
+**Behavior:** See Consecutive work days and the 7th day above. A single short shift counts as **one** worked day; multiple segments on the same local day still count as **one** day for that streak.
+
+---
+
+### 4. Shift edited after swap approval but before the shift occurs
+
+**Decision:** **Invalidate in-flight coverage when the shift definition changes**, so swaps are not silently executed against **stale** times.
+
+**Behavior:**
+
+- On **shift update** or **shift delete**, the service calls `cancelCoverageForShift`, which finds coverage requests in `**PENDING`** or `**ACCEPTED**` (peer accepted, manager not finalized yet) that reference that shift (or a two-way swap’s **secondary** shift) and sets them to `**CANCELLED`**.
+- **Requester and target** receive **notifications** and realtime updates.
+- After **manager approval**, the swap has been **finalized** (assignments moved); those rows are **not** in the cancel-on-edit set. Further edits are ordinary **shift edits** with normal constraint checks on **who is assigned now**.
+
+So: **before** final manager approval, editing times **cancels** the pending swap workflow; **after** approval, you are editing **real** assignments, not a pending coverage request.
+
+---
+
+### 5. Location spanning a timezone boundary
+
+**Decision:** **One site = one IANA timezone.** There is **no** model for a single location whose **clock** runs in two zones.
+
+**Behavior:**
+
+- Each `**Location`** stores a single `**tzIana**` (e.g. `America/New_York`). All scheduling, “local day” rules, and daily-hour splits use that zone.
 
 ---
 
